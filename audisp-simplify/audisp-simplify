@@ -1,0 +1,585 @@
+#!/bin/env perl
+################################################################################
+# 20130928 Kirby  v1.0
+# 20131001 Kirby  v1.0.1
+# 20131004 Kirby  v1.0.2
+# 20131006 Kirby  v1.0.3
+# 20140314 Kirby  v1.0.4
+# 20150628 Kirby  v1.0.5
+# 20150724 Kirby  v1.0.6
+# 20150728 Kirby  v1.0.7
+################################################################################
+
+# LICENSE
+#
+#    audisp-simplify is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    audisp-simplify is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with audisp-simplify; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
+use POSIX qw(strftime);
+use strict;
+umask 0077;
+
+# mitigation for bug with timezone
+$ENV{TZ} = strftime( "%Z", localtime() );
+
+&Main;
+
+#################################################################################
+sub Main {
+	my $argc;
+	my $args;
+	my $auditid;
+	my @ausearch;
+	my $ausearch;
+	my $cmd;
+	my @command;
+	my $date;
+	my $epoch;
+	my $event;
+	my $exe;
+	my $ignorefile = '/etc/audisp/simplify.ignores';
+	my $ignorekey;
+	my %ignores;
+	my $ignorestring;
+	my $item;
+	my $key;
+	my $log;
+        my $logfile = '/var/log/audisp-simplify';
+	my $saddr;
+	my %sh;
+	my $subkey;
+	my $time;
+	my %tracker;
+
+	if ( -f "$ignorefile" ) {
+		open( IG, '<', "$ignorefile" );
+		while (<IG>) {
+			chomp;
+			next if ( $_ =~ /^#/ );
+			( $ignorekey, $ignorestring ) = split( /=/, $_ );
+			$ignorekey =~ s/(^\s+|\s+$)//g;
+			$ignorestring =~ s/(^\s+|\s+$)//g;
+			push( @{ $ignores{$ignorekey} }, $ignorestring );
+		}
+		close(IG);
+	}
+
+  INPUT:
+	while (<STDIN>) {
+		chomp;
+		$event = $_;
+		if ( $event =~ m|^node=(\S+) type=(USER_CMD) msg=audit\(\d+\.\d+:(\d+)\):| ) {
+
+			# USER_CMD doesn't log what you think it does.
+			# It's mostly just stuff run via sudo.
+			$auditid            = $3;
+			$sh{$auditid}{type} = $2;
+			$sh{$auditid}{node} = $1;
+
+			$sh{$auditid}{pid}      = $1                if ( $event =~ m| pid=(\d+)| );
+			$sh{$auditid}{origuser} = &auid_to_user($1) if ( $event =~ m| auid=(\d+)| );
+			$sh{$auditid}{user}     = &uid_to_user($1)  if ( $event =~ m| uid=(\d+)| );
+			$sh{$auditid}{terminal} = $1                if ( $event =~ m| terminal=(\S+)| );
+			$sh{$auditid}{ses}      = $1                if ( $event =~ m| ses=(\d+)| );
+			$sh{$auditid}{res}      = $1                if ( $event =~ m| res=(\d+)| );
+			$sh{$auditid}{cwd}      = $1                if ( $event =~ m|'cwd=(\S+)| );
+			$sh{$auditid}{cmd}      = $1                if ( $event =~ m| cmd=(\S+)| );
+			$sh{$auditid}{cmd} = pack( "H*", "$1" ) if ( $sh{$auditid}{cmd} =~ m|^([A-F0-9]+)$| );
+		}
+		elsif ( $event =~ m|^node=(\S+) type=(SOCKADDR) msg=audit\(\d+\.\d+:(\d+)\):| ) {
+			$auditid            = $3;
+			$sh{$auditid}{type} = $2;
+			$sh{$auditid}{node} = $1;
+
+			$saddr = $1 if ( $event =~ m| saddr=([A-F0-9]+)| );
+
+			&xlate_saddr( $saddr, \$sh{$auditid}{saddr}, \$sh{$auditid}{port} );
+		}
+		elsif ( $event =~ m|^node=(\S+) type=(EXECVE) msg=audit\(\d+\.\d+:(\d+)\):.* argc=(\d+)( .*)| ) {
+			$auditid            = $3;
+			$sh{$auditid}{node} = $1;
+			$sh{$auditid}{type} = $2;
+			$argc               = $4;
+			$args               = $5;
+			$sh{$auditid}{ses} = $1 if ( $event =~ m| ses=(\d+)| );
+
+			if ( $argc > $sh{$auditid}{argc} ) {
+
+				# Sometimes there are more than 1 EXECVE lines with missing args.
+				# Choose the highest argc.
+				$sh{$auditid}{argc} = $argc;
+			}
+			else {
+				next INPUT;
+			}
+			@command = split( /\s+a\d+=/, $args );
+			foreach $cmd (@command) {
+				if ( $cmd =~ m|^([A-F0-9]+)$| ) {
+					$cmd = pack( "H*", "$1" );
+				}
+				$cmd =~ s/(^"|"$|^\s+|\s+$)//g;
+				push( @{ $sh{$auditid}{cleancmd} }, $cmd );
+			}
+
+			$sh{$auditid}{command} = join( ' ', @{ $sh{$auditid}{cleancmd} } );
+			$sh{$auditid}{command} =~ s/(^\s+|\s+$)//g;
+			$sh{$auditid}{command} =~ s|\n| |g;
+			$sh{$auditid}{command} =~ s|\s+| |g;
+		}
+		elsif ( $event =~ m|^node=(\S+) type=CWD msg=audit\(\d+\.\d+:(\d+)\):| ) {
+			$auditid = $2;
+			$sh{$auditid}{node} = $1;
+
+			$sh{$auditid}{cwd} = $1 if ( $event =~ m| cwd=(\S+)| );
+
+			if ( $sh{$auditid}{cwd} =~ m|^([A-F0-9]+)$| ) {
+				$sh{$auditid}{cwd} = pack( "H*", "$1" );
+			}
+		}
+		elsif ( $event =~ m|^node=(\S+) type=PATH msg=audit\(\d+\.\d+:(\d+)\):| ) {
+			$auditid = $2;
+			$sh{$auditid}{node} = $1;
+
+			$item = $1 if ( $event =~ m| item=(\d+)| );
+
+			$sh{$auditid}{name} = $1 if ( $event =~ m| name=(\S+)| );
+
+			if ( $sh{$auditid}{name} =~ /^([A-F0-9]+)$/ ) {
+				$sh{$auditid}{name} = pack( "H*", "$1" );
+			}
+
+			if ( ( $item > ( defined $sh{$auditid}{item} ) ? $sh{$auditid}{item} : -1 ) and ( $sh{$auditid}{name} ne '(null)' ) ) {
+
+				# Sometimes there are more than 1 PATH lines.
+				# Choose the highest item.
+				$sh{$auditid}{item} = $item;
+			}
+			else {
+				next INPUT;
+			}
+
+			$sh{$auditid}{item} = $item;
+		}
+		elsif ( $event =~ m|^node=(\S+) type=SYSCALL msg=audit\(\d+\.\d+:(\d+)\):| ) {
+			$auditid = $2;
+			$sh{$auditid}{node} = $1;
+
+			$sh{$auditid}{ppid}     = $1                if ( $event =~ m| ppid=(\d+)| );
+			$sh{$auditid}{pid}      = $1                if ( $event =~ m| pid=(\d+)| );
+			$sh{$auditid}{origuser} = &auid_to_user($1) if ( $event =~ m| auid=(\d+)| );
+			$sh{$auditid}{user}     = &uid_to_user($1)  if ( $event =~ m| uid=(\d+)| );
+			$sh{$auditid}{tty}      = $1                if ( $event =~ m| tty=(\S+)| );
+			$sh{$auditid}{exe}      = $1                if ( $event =~ m| exe=(\S+)| );
+			$sh{$auditid}{key}      = $1                if ( $event =~ m| key="(\S+)"| );
+			$sh{$auditid}{ses}      = $1                if ( $event =~ m| ses=(\d+)| );
+
+			if ( $sh{$auditid}{exe} =~ /^([A-F0-9]+)$/ ) {
+				$sh{$auditid}{exe} = pack( "H*", "$1" );
+			}
+		}
+		elsif ( $event =~ m|^node=(\S+) type=(USER_AUTH) msg=audit\(\d+\.\d+:(\d+)\):| ) {
+			$auditid            = $3;
+			$sh{$auditid}{node} = $1;
+			$sh{$auditid}{type} = $2;
+			$sh{$auditid}{pid}      = $1                if ( $event =~ m| pid=(\d+)| );
+			$sh{$auditid}{user}     = &uid_to_user($1)  if ( $event =~ m| uid=(\d+)| );
+			$sh{$auditid}{origuser} = &auid_to_user($1) if ( $event =~ m| auid=(\d+)| );
+			$sh{$auditid}{op}       = $1                if ( $event =~ m|'op=(\S+)| );
+			$sh{$auditid}{fp}       = $1                if ( $event =~ m| fp=([a-f0-9:]+)| );
+			$sh{$auditid}{exe}      = $1                if ( $event =~ m| exe=(\S+)| );
+			$sh{$auditid}{hostname} = $1                if ( $event =~ m| hostname=(\S+)| );
+			$sh{$auditid}{terminal} = $1                if ( $event =~ m| terminal=(\S+)| );
+			$sh{$auditid}{res}      = $1                if ( $event =~ m| res=(\w+)| );
+			$sh{$auditid}{addr}     = $1                if ( $event =~ m| addr=(\S+)| );
+			$sh{$auditid}{acct}     = $1                if ( $event =~ m| acct=(\S+)| );
+
+			if ( $sh{$auditid}{acct} =~ m|^([A-F0-9]+)$| ) {
+				$sh{$auditid}{acct} = pack( "H*", "$1" );
+			}
+		}
+
+		$sh{$auditid}{epoch} = time;
+		$sh{$auditid}{date} = strftime "%Y-%m-%d",   localtime(time);
+		$sh{$auditid}{time} = strftime "%H:%M:%S%z", localtime(time);
+
+
+	  AUDITID:
+		foreach $auditid ( sort( keys %sh ) ) {
+
+			# audits do not arrive in order.
+			# wait a few seconds before logging.
+			next AUDITID if ( time < $sh{$auditid}{epoch} + 3 );
+
+			foreach $ignorekey ( keys %ignores ) {
+				foreach $ignorestring ( @{ $ignores{$ignorekey} } ) {
+					if ( $sh{$auditid}{$ignorekey} =~ m|$ignorestring| ) {
+						delete $sh{$auditid};
+						next AUDITID;
+					}
+				}
+			}
+
+			# don't log myself
+			if ( ( $sh{$auditid}{ppid} == $$ ) or ( $sh{$auditid}{pid} == $$ ) ) {
+				delete $sh{$auditid};
+				next AUDITID;
+			}
+
+			# invalid record unless there is a pid
+			unless ( $sh{$auditid}{pid}) {
+				delete $sh{$auditid};
+				next AUDITID;
+			}
+			foreach $subkey ( keys %{ $sh{$auditid} } ) {
+				$sh{$auditid}{$subkey} =~ s|"||g;
+			}
+
+			$log = qq(type="$sh{$auditid}{type}")
+                            . qq( auditid=$auditid)
+                            . qq( node="$sh{$auditid}{node}")
+                            . qq( date="$sh{$auditid}{date}")
+                            . qq( time="$sh{$auditid}{time}")
+                            . qq( pid=$sh{$auditid}{pid})
+                            . qq( user="$sh{$auditid}{user}")
+                            . qq( origuser="$sh{$auditid}{origuser}");
+
+			if ( $sh{$auditid}{type} eq 'USER_CMD' ) {
+                            $log .= qq( cwd="$sh{$auditid}{cwd}")
+				  . qq( cmd="$sh{$auditid}{cmd}")
+				  . qq( terminal="$sh{$auditid}{terminal}")
+				  . qq( ses="$sh{$auditid}{ses}")
+				  . qq( res="$sh{$auditid}{res}");
+			}
+			elsif ( $sh{$auditid}{type} eq 'USER_AUTH' ) {
+                            $log .= qq( exe="$sh{$auditid}{exe}")
+				  . qq( op="$sh{$auditid}{op}")
+				  . qq( fp="$sh{$auditid}{fp}")
+				  . qq( res="$sh{$auditid}{res}")
+				  . qq( addr="$sh{$auditid}{addr}")
+				  . qq( acct="$sh{$auditid}{acct}")
+				  . qq( hostname="$sh{$auditid}{hostname}")
+				  . qq( terminal="$sh{$auditid}{terminal}");
+			}
+			elsif ( $sh{$auditid}{type} eq 'EXECVE' ) {
+                            $log .= qq( key="$sh{$auditid}{key}")
+				  . qq( tty="$sh{$auditid}{tty}")
+				  . qq( ppid=$sh{$auditid}{ppid})
+				  . qq( ses=$sh{$auditid}{ses})
+				  . qq( exe="$sh{$auditid}{exe}")
+				  . qq( cwd="$sh{$auditid}{cwd}")
+				  . qq( command="$sh{$auditid}{command}");
+			}
+			elsif ( $sh{$auditid}{key} eq 'FILE' ) {
+                            $log .= qq( key="$sh{$auditid}{key}")
+				  . qq( tty="$sh{$auditid}{tty}")
+				  . qq( ppid=$sh{$auditid}{ppid})
+				  . qq( exe="$sh{$auditid}{exe}")
+				  . qq( name="$sh{$auditid}{name}")
+				  . qq( cwd="$sh{$auditid}{cwd}");
+			}
+			elsif ( $sh{$auditid}{type} eq 'SOCKADDR' ) {
+                            $log .= qq( key="$sh{$auditid}{key}")
+				  . qq( tty="$sh{$auditid}{tty}")
+				  . qq( ppid=$sh{$auditid}{ppid})
+				  . qq( exe="$sh{$auditid}{exe}")
+				  . qq( saddr="$sh{$auditid}{saddr}")
+				  . qq( port="$sh{$auditid}{port}");
+			}
+                        else {
+                            delete $sh{$auditid};
+                            next AUDITID;
+                        }
+
+                        $log .= qq(\n);
+                        open( LOGFILE, ">>", "$logfile" ) and do {
+                            print LOGFILE $$log;
+                            close(LOGFILE);
+                        };
+			delete $sh{$auditid};
+
+		}
+	}
+
+	return 0;
+
+}
+
+#################################################################################
+sub uid_to_user {
+
+	my $uid = shift;
+	my $user;
+
+	unless ( $user = getpwuid($uid) ) {
+		$user = $uid;
+	}
+
+	return $user;
+}
+#################################################################################
+
+#################################################################################
+sub auid_to_user {
+
+	my $auid = shift;
+	my $user;
+
+	unless ( $user = getpwuid($auid) ) {
+		if ( $auid == 4294967295 ) {
+			$user = '';
+		}
+		else {
+			$user = $auid;
+		}
+	}
+	return $user;
+}
+#################################################################################
+
+#################################################################################
+sub xlate_saddr {
+	my $saddr   = shift;
+	my $r_saddr = shift;
+	my $r_port  = shift;
+	my $fam1;
+	my $fam2;
+	my $family;
+	my $port1;
+	my $port2;
+	my @addr;
+	my $port;
+	my @ipparts;
+	my $ip;
+	my $junk;
+	my $ip6;
+	my @ip6a;
+
+	( $fam1, $fam2, $port1, $port2, @addr ) = unpack( "A2A2A2A2A2A2A2A2", $saddr );
+	$family = hex($fam1) + 256 * hex($fam2);
+	if ( $family == 10 ) {
+		( $junk, $port1, $port2, $junk, $ip6 ) = unpack( "A4A2A2A8A32", $saddr );
+		$port = 256 * hex($port1) + hex($port2);
+		@ip6a = split( //, $ip6 );
+		if ( "@ip6a[20 .. 23]" eq "F F F F" ) {
+
+			# is really ipv4 in ipv6 notation
+			( $junk, @addr ) = unpack( "A40A2A2A2A2", $saddr );
+			$ip       = hex( $addr[0] ) . '.' . hex( $addr[1] ) . '.' . hex( $addr[2] ) . '.' . hex( $addr[3] );
+			$$r_saddr = ':::::FFFF:' . $ip;
+			$$r_port  = $port;
+		}
+		else {
+			$ip6 = "@ip6a[0 .. 3]" . ':';
+			$ip6 .= "@ip6a[4 .. 7]" . ':';
+			$ip6 .= "@ip6a[8 .. 11]" . ':';
+			$ip6 .= "@ip6a[12 .. 15]" . ':';
+			$ip6 .= "@ip6a[16 .. 19]" . ':';
+			$ip6 .= "@ip6a[20 .. 23]" . ':';
+			$ip6 .= "@ip6a[24 .. 27]" . ':';
+			$ip6 .= "@ip6a[28 .. 31]";
+			$ip6 =~ s/\s+//g;
+			$ip6 =~ s/0000//g;
+			$$r_saddr = $ip6;
+			$$r_port  = $port;
+		}
+	}
+	elsif ( $family == 2 ) {
+		$port     = 256 * hex($port1) + hex($port2);
+		$ip       = hex( $addr[0] ) . '.' . hex( $addr[1] ) . '.' . hex( $addr[2] ) . '.' . hex( $addr[3] );
+		$$r_saddr = $ip;
+		$$r_port  = $port;
+	}
+	elsif ( $family == 1 ) {
+		$saddr =~ s/(^01..|00.+$)//g;
+		$$r_saddr = pack( "H*", "$saddr" );
+	}
+	if ( $saddr == 100000000000000000000000 ) {
+		$$r_saddr = 'netlink pid:0';
+	}
+	return 0;
+}
+
+#################################################################################
+
+__END__
+
+README
+This program is an audisp plugin that will make audit events from the Linux Audit daemon human readable.
+It will look for execve, socketcall, bind, and connect system calls as well as filesystem changes (if you setup audit rules) and consolidate the events into a simple log format.
+The log is in key=value format for easy consumption from Splunk or other log analytic software.
+Here is a Splunk query that I run: source="/var/log/audisp-simplify"  |table time key tty ppid origuser user cwd exe name saddr command |sort _time desc 
+The logs include the origuser, which is the original login id.  This is beneficial for seeing who made the syscalls after su'ing to another user such as root.
+
+Here is an execve syscall example of a shell command, uname -a, executed as myself after su'ing to root:
+type=EXECVE key=EXECVE auditid=143600 date="2013-09-29" time="13:33:08-0500" node="goemon.lunari.net" tty=pts1 ppid=2437 pid=8189 exe="/usr/bin/uname" origuser=mkirby user=root cwd="/var/log" command="uname -a"
+
+
+Here is an example of /etc/hosts being edited:
+type= key=FILE auditid=143645 date="2013-09-29" time="13:36:19-0500" node="goemon.lunari.net" tty=pts1 ppid=2437 pid=8208 exe="/usr/bin/vi" name="/etc/hosts~" user=root origuser=mkirby cwd="/var/log"
+
+    
+Here is a connect syscall example of an egress connection to mkirby.org:
+type=SOCKADDR key=CONNECT auditid=143682 date="2013-09-29" time="13:38:49-0500" node="goemon.lunari.net" tty=pts1 ppid=2437 pid=8229 origuser=mkirby user=root saddr="184.82.178.105 port 443" exe="/usr/bin/telnet"
+    
+Here is a bind syscall example of httpd binding to port 443:
+type=SOCKADDR key=BIND auditid=143745 date="2013-09-29" time="13:39:31-0500" node="goemon.lunari.net" tty=(none) ppid=1 pid=8252 origuser=4294967295 user=root saddr="0.0.0.0 port 443" exe="/usr/sbin/httpd"
+    
+    
+    
+    
+INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
+
+1) Place this script file in /bin/ and chmod this file to 750
+
+2) Install the audit and audispd-plugins packages
+
+3) Enable auditd  on bootup and start the service
+
+4) Create a new file, /etc/audisp/plugins.d/simplify.conf and add the following:
+    active = yes
+    direction = out
+    path = /bin/audisp-simplify
+    type = always
+    format = string
+
+5) Increase queue in /etc/audisp/audispd.conf and set overflow_action to ignore
+    q_depth = 65536
+    overflow_action = ignore
+
+5) Replace /etc/audit/audit.rules and/or /etc/audit/rules.d/audit.rules with the following: (you may want to add/del to dir monitoring)
+    # delete all existing rules
+    -D
+    # disable auditing during load
+    -e 0
+    # fail silently
+    -f 0
+    # 65k buffer
+    -b 65536
+    # no rate
+    -r 0
+    # continue loading if bad rule and report
+    -c
+    #
+    # Add any other dirs you want monitored for file writes
+    # These can be noisy during patching.  Enable at your own risk
+    #-w /etc/ -p w -k FILE
+    #-w /root/ -p w -k FILE
+    #-w /var/spool/at/ -p w -k FILE
+    #-w /var/spool/cron/ -p w -k FILE
+    #-w /usr/lib/ -p w -k FILE
+    #-w /usr/lib64/ -p w -k FILE
+    #-w /usr/libexec/ -p w -k FILE
+    #-w /usr/bin/ -p w -k FILE
+    #-w /usr/sbin/ -p w -k FILE
+    #-w /usr/local/ -p w -k FILE
+    #-w /boot/ -p w -k FILE
+    #
+    # Monitor commands
+    -a exit,always -F arch=b32 -S execve -k EXECVE
+    -a exit,always -F arch=b64 -S execve -k EXECVE
+    #
+    # Monitor network connections.
+    # These are VERY noisy.  Enable at your own risk
+    #-a exit,always -F arch=b32 -S socketcall -k SOCKETCALL -F exit!=-2
+    #-a exit,always -F arch=b64 -S bind -k BIND -F exit!=-2
+    #-a exit,always -F arch=b64 -S connect -k CONNECT -F exit!=-2
+    #
+    # activate auditing
+    -e 1
+
+
+6) Setup log rotation by creating /etc/logrotate.d/audisp-simplify 
+   Add the following:
+        {
+        rotate 30
+        daily
+        create
+        compress
+        dateext
+        dateyesterday
+        shred
+        sharedscripts
+        create 0600 root root
+        postrotate
+            /sbin/service auditd restart >/dev/null 2>&1 || true
+            /bin/systemctl reload auditd.service >/dev/null 2>&1 || true
+        endscript
+        }
+
+7) [OPTIONAL] Setup an ignores file for strings that you don't want logged.
+    Create a new file /etc/audisp/simplify.ignores and use key=value pairs to specify what you don't want logged.
+    The string values can be in Perl regex format.
+    Here is an example of my file:
+        saddr=netlink.*
+        saddr=public
+        saddr=private
+        saddr=/dev/log
+        saddr=.*port 53
+        saddr=.*:53
+        saddr=::::::: port
+        name=.*swx"$
+        name=.*swp"$
+        name=.*swpx"$
+        exe="/var/ossec/bin/ossec-syscheckd"
+        exe="/opt/splunk/bin/splunkd"
+        exe="/opt/splunkforwarder/bin/splunkd"
+        
+8) Restart the auditd service
+
+9) Done.  Now you can watch the simple audit logs in /var/log/audisp-simplify
+
+
+
+
+
+AFTER INSTALL
+1) Keep an eye on the audit queue with 'auditctl -s'.  You may need to tune audit if the lost and backlog events increase
+
+2) Keep an eye on your syslog for errors from audispd.  You may need to increase the q_depth and priority_boost in /etc/audisp/audispd.conf
+
+3) If you have an insanely busy uid, you can add "-F uid!=<uid>" to execve in audit.rules
+
+
+
+
+
+INSTALLATION ADDENDUM FOR SELINUX
+If you are running SELinux, you may want to add the following to your local policy.
+1) Add these lines to /etc/selinux/targeted/modules/active/src/local.te
+    
+    module local 1.0;
+    require {
+        class dir { open getattr search write read remove_name add_name };
+        class file { create open read write execute execute_no_trans getattr };
+        type audisp_t;
+        type auditd_t;
+        type auditd_etc_t;
+        type auditd_log_t;
+        type var_log_t;
+    }  
+    allow audisp_t var_log_t:file { create open read write execute execute_no_trans getattr };
+    allow audisp_t var_log_t:dir { write add_name };
+    allow audisp_t auditd_etc_t:dir { read search open };
+    allow audisp_t auditd_etc_t:file { read open getattr };
+    allow audisp_t auditd_log_t:dir { read search open };
+    allow audisp_t auditd_log_t:file { read open getattr };
+
+2) and then run
+    cd /etc/selinux/targeted/modules/active/src/
+    checkmodule -M -m -o local.mod local.te
+    semodule_package -o local.pp -m local.mod
+    semodule -i local.pp
+
+
+
