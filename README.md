@@ -22,7 +22,7 @@ type=SOCKADDR key=BIND auditid=143745 date="2013-09-29" time="13:39:31-0500" nod
     
     
     
-    
+```
 INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
 
 1) Place this script file in /bin/ and chmod this file to 750
@@ -165,3 +165,4 @@ If you are running SELinux, you may want to add the following to your local poli
     checkmodule -M -m -o local.mod local.te
     semodule_package -o local.pp -m local.mod
     semodule -i local.pp
+```
