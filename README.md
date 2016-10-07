@@ -25,11 +25,13 @@ type=SOCKADDR key=BIND auditid=143745 date="2013-09-29" time="13:39:31-0500" nod
 ```
 INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
 
-1) Place this script file in /bin/ and chmod this file to 750
+1) Place this script file in /bin/ and chmod this file to 750.  Then run a perl check on the file like so, 'perl -c /bin/audisp-simplify'.   If perl reports any errors, then check your perl installation.
 
 2) Install the audit and audispd-plugins packages
+    Example: yum install -y audit audispd-plugins
 
 3) Enable auditd  on bootup and start the service
+    Example: systemctl enable auditd (on CentOS 7+) or chkconfig auditd on (on CentOS6-)
 
 4) Create a new file, /etc/audisp/plugins.d/simplify.conf and add the following:
     active = yes
@@ -86,6 +88,7 @@ INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
 
 6) Setup log rotation by creating /etc/logrotate.d/audisp-simplify 
    Add the following:
+   /var/log/audisp-simplify
         {
         rotate 30
         daily
@@ -120,7 +123,7 @@ INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
         exe="/opt/splunk/bin/splunkd"
         exe="/opt/splunkforwarder/bin/splunkd"
         
-8) Restart the auditd service
+8) Restart the auditd service.  If you are running systemd (CentOS 7+), then you will need to reboot.
 
 9) Done.  Now you can watch the simple audit logs in /var/log/audisp-simplify
 
