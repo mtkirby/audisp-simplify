@@ -125,7 +125,9 @@ INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
         
 8) Restart the auditd service.  If you are running systemd (CentOS 7+), then you will need to reboot.
 
-9) Done.  Now you can watch the simple audit logs in /var/log/audisp-simplify
+9) If you are seeing audit logs in journald, you can disable it with systemctl mask systemd-journald-audit.socket
+
+10) Done.  Now you can watch the simple audit logs in /var/log/audisp-simplify
 
 
 
