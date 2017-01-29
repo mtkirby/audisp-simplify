@@ -44,7 +44,7 @@ INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
     q_depth = 65536
     overflow_action = ignore
 
-5) Replace /etc/audit/audit.rules and/or /etc/audit/rules.d/audit.rules with the following: (you may want to add/del to dir monitoring)
+6) Replace /etc/audit/audit.rules and/or /etc/audit/rules.d/audit.rules with the following: (you may want to add/del to dir monitoring).  YOU NEED A KEY DEFINED ( -k ) for audisp-simplify to log the event.
     # delete all existing rules
     -D
     # disable auditing during load
@@ -86,7 +86,7 @@ INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
     -e 1
 
 
-6) Setup log rotation by creating /etc/logrotate.d/audisp-simplify 
+7) Setup log rotation by creating /etc/logrotate.d/audisp-simplify 
    Add the following:
    /var/log/audisp-simplify
         {
@@ -105,7 +105,7 @@ INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
         endscript
         }
 
-7) [OPTIONAL] Setup an ignores file for strings that you don't want logged.
+8) [OPTIONAL] Setup an ignores file for strings that you don't want logged.
     Create a new file /etc/audisp/simplify.ignores and use key=value pairs to specify what you don't want logged.
     The string values can be in Perl regex format.
     Here is an example of my file:
@@ -123,11 +123,11 @@ INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
         exe="/opt/splunk/bin/splunkd"
         exe="/opt/splunkforwarder/bin/splunkd"
         
-8) Restart the auditd service.  If you are running systemd (CentOS 7+), then you will need to reboot.
+9) Restart the auditd service.  If you are running systemd (CentOS 7+), then you will need to reboot.
 
-9) If you are seeing audit logs in journald, you can disable it with systemctl mask systemd-journald-audit.socket
+10) If you are seeing audit logs in journald, you can disable it with systemctl mask systemd-journald-audit.socket
 
-10) Done.  Now you can watch the simple audit logs in /var/log/audisp-simplify
+11) Done.  Now you can watch the simple audit logs in /var/log/audisp-simplify
 
 
 

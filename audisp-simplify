@@ -9,6 +9,7 @@
 # 20150724 Kirby  v1.0.6
 # 20150728 Kirby  v1.0.7
 # 20161007 Kirby  v1.0.8
+# 20170129 Kirby  v1.0.9
 ################################################################################
 
 # LICENSE
@@ -45,6 +46,7 @@ sub Main {
     my $ausearch;
     my $cmd;
     my @command;
+    my @cleancmd;
     my $date;
     my $epoch;
     my $event;
@@ -80,131 +82,130 @@ sub Main {
     while (<STDIN>) {
         chomp;
         $event = $_;
-        if ( $event =~ m|^node=(\S+) type=(USER_CMD) msg=audit\(\d+\.\d+:(\d+)\):| ) {
-
-            # USER_CMD doesn't log what you think it does.
-            # It's mostly just stuff run via sudo.
+        if ( $event =~ m|^node=(\S+) type=(\S+) msg=audit\(\d+\.\d+:(\d+)\): | ) {
             $auditid            = $3;
-            $sh{$auditid}{type} = $2;
             $sh{$auditid}{node} = $1;
+            $sh{$auditid}{type} = $2;
 
-            $sh{$auditid}{pid}      = $1                if ( $event =~ m| pid=(\d+)| );
+            $sh{$auditid}{auditid}  = $auditid;
+            $sh{$auditid}{epoch}    = time;
+            $sh{$auditid}{date}     = strftime "%Y-%m-%d", localtime(time);
+            $sh{$auditid}{time}     = strftime "%H:%M:%S%z", localtime(time);
+            $sh{$auditid}{acct}     = $1 if ( $event =~ m| acct=(\S+)| );
+            $sh{$auditid}{addr}     = $1 if ( $event =~ m| addr=(\S+)| );
+            $sh{$auditid}{cmd}      = $1 if ( $event =~ m| cmd=(\S+)| );
+            $sh{$auditid}{cmd}      = pack( "H*", "$1" ) if ( $sh{$auditid}{cmd} =~ m|^([A-F0-9]+)$| );
+            $sh{$auditid}{cwd}      = $1 if ( $event =~ m|'cwd=(\S+)| );
+            $sh{$auditid}{exe}      = $1 if ( $event =~ m| exe=(\S+)| );
+            $sh{$auditid}{fp}       = $1 if ( $event =~ m| fp=([a-f0-9:]+)| );
+            $sh{$auditid}{hostname} = $1 if ( $event =~ m| hostname=(\S+)| );
+            $sh{$auditid}{key}      = $1 if ( $event =~ m| key="(\S+)"| );
+            $sh{$auditid}{op}       = $1 if ( $event =~ m|'op=(\S+)| );
             $sh{$auditid}{origuser} = &auid_to_user($1) if ( $event =~ m| auid=(\d+)| );
-            $sh{$auditid}{user}     = &uid_to_user($1)  if ( $event =~ m| uid=(\d+)| );
-            $sh{$auditid}{terminal} = $1                if ( $event =~ m| terminal=(\S+)| );
-            $sh{$auditid}{ses}      = $1                if ( $event =~ m| ses=(\d+)| );
-            $sh{$auditid}{res}      = $1                if ( $event =~ m| res=(\d+)| );
-            $sh{$auditid}{cwd}      = $1                if ( $event =~ m|'cwd=(\S+)| );
-            $sh{$auditid}{cmd}      = $1                if ( $event =~ m| cmd=(\S+)| );
-            $sh{$auditid}{cmd} = pack( "H*", "$1" ) if ( $sh{$auditid}{cmd} =~ m|^([A-F0-9]+)$| );
-        } elsif ( $event =~ m|^node=(\S+) type=(SOCKADDR) msg=audit\(\d+\.\d+:(\d+)\):| ) {
-            $auditid            = $3;
-            $sh{$auditid}{type} = $2;
-            $sh{$auditid}{node} = $1;
+            $sh{$auditid}{pid}      = $1 if ( $event =~ m| pid=(\d+)| );
+            $sh{$auditid}{ppid}     = $1 if ( $event =~ m| ppid=(\d+)| );
+            $sh{$auditid}{res}      = $1 if ( $event =~ m| res=(\d+)| );
+            $sh{$auditid}{ses}      = $1 if ( $event =~ m| ses=(\d+)| );
+            $sh{$auditid}{terminal} = $1 if ( $event =~ m| terminal=(\S+)| );
+            $sh{$auditid}{tty}      = $1 if ( $event =~ m| tty=(\S+)| );
+            $sh{$auditid}{user}     = &uid_to_user($1) if ( $event =~ m| uid=(\d+)| );
 
-            $saddr = $1 if ( $event =~ m| saddr=([A-F0-9]+)| );
-
-            &xlate_saddr( $saddr, \$sh{$auditid}{saddr}, \$sh{$auditid}{port} );
-        } elsif ( $event =~ m|^node=(\S+) type=(EXECVE) msg=audit\(\d+\.\d+:(\d+)\):.* argc=(\d+)( .*)| ) {
-            $auditid            = $3;
-            $sh{$auditid}{node} = $1;
-            $sh{$auditid}{type} = $2;
-            $argc               = $4;
-            $args               = $5;
-            $sh{$auditid}{ses} = $1 if ( $event =~ m| ses=(\d+)| );
-
-            if ( $argc > $sh{$auditid}{argc} ) {
-
-                # Sometimes there are more than 1 EXECVE lines with missing args.
-                # Choose the highest argc.
-                $sh{$auditid}{argc} = $argc;
-            } else {
+            # don't log myself
+            if ( $$ == ( defined $sh{$auditid}{pid} ? $sh{$auditid}{pid} : 0 ) ) {
                 next INPUT;
             }
-            @command = split( /\s+a\d+=/, $args );
-            foreach $cmd (@command) {
-                if ( $cmd =~ m|^([A-F0-9]+)$| ) {
-                    $cmd = pack( "H*", "$1" );
+            if ( $$ == ( defined $sh{$auditid}{ppid} ? $sh{$auditid}{ppid} : 0 ) ) {
+                next INPUT;
+            }
+            if ( $event =~ m| saddr=([A-F0-9]+)| ) {
+                $saddr = $1;
+                &xlate_saddr( $saddr, \$sh{$auditid}{saddr}, \$sh{$auditid}{port} );
+            }
+
+            if ( $event =~ m| cwd=(\S+)| ) {
+                $sh{$auditid}{cwd} = $1;
+                if ( $sh{$auditid}{cwd} =~ m|^([A-F0-9]+)$| ) {
+                    $sh{$auditid}{cwd} = pack( "H*", "$1" );
                 }
-                $cmd =~ s/(^"|"$|^\s+|\s+$)//g;
-                push( @{ $sh{$auditid}{cleancmd} }, $cmd );
             }
 
-            $sh{$auditid}{command} = join( ' ', @{ $sh{$auditid}{cleancmd} } );
-            $sh{$auditid}{command} =~ s/(^\s+|\s+$)//g;
-            $sh{$auditid}{command} =~ s|\n| |g;
-            $sh{$auditid}{command} =~ s|\s+| |g;
-        } elsif ( $event =~ m|^node=(\S+) type=CWD msg=audit\(\d+\.\d+:(\d+)\):| ) {
-            $auditid = $2;
-            $sh{$auditid}{node} = $1;
+            if ( $event =~ m| argc=(\d+)| ) {
+                $argc = $1;
+                $args = $1 if ( $event =~ m| argc=\d+( .*)| );
+                if ( $argc > ( defined $sh{$auditid}{argc} ? $sh{$auditid}{argc} : 0 ) ) {
+                    # Sometimes there are more than 1 EXECVE lines with missing args.
+                    # Choose the highest argc.
+                    $sh{$auditid}{argc} = $argc;
+                }
+                else {
+                    next INPUT;
+                }
+                @command = split( /\s+a\d+=/, $args );
+                @cleancmd = '';
+                foreach $cmd (@command) {
+                    if ( $cmd =~ m|^([A-F0-9]+)$| ) {
+                        $cmd = pack( "H*", "$1" );
+                    }
+                    $cmd =~ s/(^"|"$|^\s+|\s+$)//g;
+                    push( @cleancmd, $cmd );
+                }
 
-            $sh{$auditid}{cwd} = $1 if ( $event =~ m| cwd=(\S+)| );
-
-            if ( $sh{$auditid}{cwd} =~ m|^([A-F0-9]+)$| ) {
-                $sh{$auditid}{cwd} = pack( "H*", "$1" );
-            }
-        } elsif ( $event =~ m|^node=(\S+) type=PATH msg=audit\(\d+\.\d+:(\d+)\):| ) {
-            $auditid = $2;
-            $sh{$auditid}{node} = $1;
-
-            $item = $1 if ( $event =~ m| item=(\d+)| );
-
-            $sh{$auditid}{name} = $1 if ( $event =~ m| name=(\S+)| );
-
-            if ( $sh{$auditid}{name} =~ /^([A-F0-9]+)$/ ) {
-                $sh{$auditid}{name} = pack( "H*", "$1" );
-            }
-
-            if ( ( $item > ( defined $sh{$auditid}{item} ) ? $sh{$auditid}{item} : -1 ) and ( $sh{$auditid}{name} ne '(null)' ) ) {
-
-                # Sometimes there are more than 1 PATH lines.
-                # Choose the highest item.
-                $sh{$auditid}{item} = $item;
-            } else {
-                next INPUT;
+                $sh{$auditid}{command} = join( ' ', @cleancmd );
+                $sh{$auditid}{command} =~ s/(^\s+|\s+$)//g;
+                $sh{$auditid}{command} =~ s|\n| |g;
+                $sh{$auditid}{command} =~ s|\s+| |g;
             }
 
-            $sh{$auditid}{item} = $item;
-        } elsif ( $event =~ m|^node=(\S+) type=SYSCALL msg=audit\(\d+\.\d+:(\d+)\):| ) {
-            $auditid = $2;
-            $sh{$auditid}{node} = $1;
-
-            $sh{$auditid}{ppid}     = $1                if ( $event =~ m| ppid=(\d+)| );
-            $sh{$auditid}{pid}      = $1                if ( $event =~ m| pid=(\d+)| );
-            $sh{$auditid}{origuser} = &auid_to_user($1) if ( $event =~ m| auid=(\d+)| );
-            $sh{$auditid}{user}     = &uid_to_user($1)  if ( $event =~ m| uid=(\d+)| );
-            $sh{$auditid}{tty}      = $1                if ( $event =~ m| tty=(\S+)| );
-            $sh{$auditid}{exe}      = $1                if ( $event =~ m| exe=(\S+)| );
-            $sh{$auditid}{key}      = $1                if ( $event =~ m| key="(\S+)"| );
-            $sh{$auditid}{ses}      = $1                if ( $event =~ m| ses=(\d+)| );
-
-            if ( $sh{$auditid}{exe} =~ /^([A-F0-9]+)$/ ) {
-                $sh{$auditid}{exe} = pack( "H*", "$1" );
+            if ( $event =~ m| name=(\S+)| ) {
+                $sh{$auditid}{name} = $1;
+                if ( $sh{$auditid}{name} =~ /^([A-F0-9]+)$/ ) {
+                    $sh{$auditid}{name} = pack( "H*", "$1" );
+                }
             }
-        } elsif ( $event =~ m|^node=(\S+) type=(USER_AUTH) msg=audit\(\d+\.\d+:(\d+)\):| ) {
-            $auditid            = $3;
-            $sh{$auditid}{node} = $1;
-            $sh{$auditid}{type} = $2;
-            $sh{$auditid}{pid}      = $1                if ( $event =~ m| pid=(\d+)| );
-            $sh{$auditid}{user}     = &uid_to_user($1)  if ( $event =~ m| uid=(\d+)| );
-            $sh{$auditid}{origuser} = &auid_to_user($1) if ( $event =~ m| auid=(\d+)| );
-            $sh{$auditid}{op}       = $1                if ( $event =~ m|'op=(\S+)| );
-            $sh{$auditid}{fp}       = $1                if ( $event =~ m| fp=([a-f0-9:]+)| );
-            $sh{$auditid}{exe}      = $1                if ( $event =~ m| exe=(\S+)| );
-            $sh{$auditid}{hostname} = $1                if ( $event =~ m| hostname=(\S+)| );
-            $sh{$auditid}{terminal} = $1                if ( $event =~ m| terminal=(\S+)| );
-            $sh{$auditid}{res}      = $1                if ( $event =~ m| res=(\w+)| );
-            $sh{$auditid}{addr}     = $1                if ( $event =~ m| addr=(\S+)| );
-            $sh{$auditid}{acct}     = $1                if ( $event =~ m| acct=(\S+)| );
 
-            if ( $sh{$auditid}{acct} =~ m|^([A-F0-9]+)$| ) {
-                $sh{$auditid}{acct} = pack( "H*", "$1" );
+            if ( $event =~ m| exe=(\S+)| ) {
+                $sh{$auditid}{exe} = $1;
+                if ( $sh{$auditid}{exe} =~ /^([A-F0-9]+)$/ ) {
+                    $sh{$auditid}{exe} = pack( "H*", "$1" );
+                }
             }
+
+            if ( $event =~ m| acct=(\S+)| ) {
+                $sh{$auditid}{acct} = $1;
+                if ( $sh{$auditid}{acct} =~ m|^([A-F0-9]+)$| ) {
+                    $sh{$auditid}{acct} = pack( "H*", "$1" );
+                }
+            }
+
+            # item is an array that usually shows the library after the first element.
+            # We will only grab the first one
+            if ( $event =~ m| item=(\d+)| ) {
+                $item = $1;
+                if ( ( $item > ( defined $sh{$auditid}{item} ? $sh{$auditid}{item} : -1 ) ) and ( $sh{$auditid}{name} ne '(null)' ) ) {
+                    next INPUT;
+                }
+                else {
+                    # Sometimes there are more than 1 PATH lines.
+                    # Choose the lowest item.
+                    $sh{$auditid}{item} = $item;
+                }
+            }
+
+            # item is an array that usually shows the library after the first element.
+            #
+#            if ( $event =~ m| item=(\d+)| ) {
+#                $item = $1;
+#                if ( ( $item > ( defined $sh{$auditid}{item} ? $sh{$auditid}{item} : -1 ) ) and ( $sh{$auditid}{name} ne '(null)' ) ) {
+#                    # Sometimes there are more than 1 PATH lines.
+#                    # Choose the highest item.
+#                    $sh{$auditid}{item} = $item;
+#                }
+#                else {
+#                    next INPUT;
+#                }
+#            }
+
         }
-
-        $sh{$auditid}{epoch} = time;
-        $sh{$auditid}{date}  = strftime "%Y-%m-%d", localtime(time);
-        $sh{$auditid}{time}  = strftime "%H:%M:%S%z", localtime(time);
 
       AUDITID:
         foreach $auditid ( sort( keys %sh ) ) {
@@ -212,6 +213,12 @@ sub Main {
             # audits do not arrive in order.
             # wait a few seconds before logging.
             next AUDITID if ( time < $sh{$auditid}{epoch} + 3 );
+
+            # only log entries with a user-defined key
+            unless ( defined $sh{$auditid}{key} ) {
+                delete $sh{$auditid};
+                next AUDITID;
+            }
 
             foreach $ignorekey ( keys %ignores ) {
                 foreach $ignorestring ( @{ $ignores{$ignorekey} } ) {
@@ -222,61 +229,13 @@ sub Main {
                 }
             }
 
-            # don't log myself
-            if ( ( $sh{$auditid}{ppid} == $$ ) or ( $sh{$auditid}{pid} == $$ ) ) {
-                delete $sh{$auditid};
-                next AUDITID;
-            }
-
-            # invalid record unless there is a pid
-            unless ( $sh{$auditid}{pid} ) {
-                delete $sh{$auditid};
-                next AUDITID;
-            }
-            foreach $subkey ( keys %{ $sh{$auditid} } ) {
+            $log = '';
+            foreach $subkey ( sort ( keys %{ $sh{$auditid} } ) ) {
+                next if ( $subkey eq "item" );
+                next if ( $subkey eq "argc" );
                 $sh{$auditid}{$subkey} =~ s|"||g;
+                $log .= qq($subkey="$sh{$auditid}{$subkey}" );
             }
-
-            $log =
-                qq(type="$sh{$auditid}{type}")
-              . qq( auditid=$auditid)
-              . qq( node="$sh{$auditid}{node}")
-              . qq( date="$sh{$auditid}{date}")
-              . qq( time="$sh{$auditid}{time}")
-              . qq( pid=$sh{$auditid}{pid})
-              . qq( user="$sh{$auditid}{user}")
-              . qq( origuser="$sh{$auditid}{origuser}");
-
-            if ( $sh{$auditid}{type} eq 'USER_CMD' ) {
-                $log .= qq( cwd="$sh{$auditid}{cwd}") . qq( cmd="$sh{$auditid}{cmd}") . qq( terminal="$sh{$auditid}{terminal}") . qq( ses="$sh{$auditid}{ses}") . qq( res="$sh{$auditid}{res}");
-            } elsif ( $sh{$auditid}{type} eq 'USER_AUTH' ) {
-                $log .=
-                    qq( exe="$sh{$auditid}{exe}")
-                  . qq( op="$sh{$auditid}{op}")
-                  . qq( fp="$sh{$auditid}{fp}")
-                  . qq( res="$sh{$auditid}{res}")
-                  . qq( addr="$sh{$auditid}{addr}")
-                  . qq( acct="$sh{$auditid}{acct}")
-                  . qq( hostname="$sh{$auditid}{hostname}")
-                  . qq( terminal="$sh{$auditid}{terminal}");
-            } elsif ( $sh{$auditid}{type} eq 'EXECVE' ) {
-                $log .=
-                    qq( key="$sh{$auditid}{key}")
-                  . qq( tty="$sh{$auditid}{tty}")
-                  . qq( ppid=$sh{$auditid}{ppid})
-                  . qq( ses=$sh{$auditid}{ses})
-                  . qq( exe="$sh{$auditid}{exe}")
-                  . qq( cwd="$sh{$auditid}{cwd}")
-                  . qq( command="$sh{$auditid}{command}");
-            } elsif ( $sh{$auditid}{key} eq 'FILE' ) {
-                $log .= qq( key="$sh{$auditid}{key}") . qq( tty="$sh{$auditid}{tty}") . qq( ppid=$sh{$auditid}{ppid}) . qq( exe="$sh{$auditid}{exe}") . qq( name="$sh{$auditid}{name}") . qq( cwd="$sh{$auditid}{cwd}");
-            } elsif ( $sh{$auditid}{type} eq 'SOCKADDR' ) {
-                $log .= qq( key="$sh{$auditid}{key}") . qq( tty="$sh{$auditid}{tty}") . qq( ppid=$sh{$auditid}{ppid}) . qq( exe="$sh{$auditid}{exe}") . qq( saddr="$sh{$auditid}{saddr}") . qq( port="$sh{$auditid}{port}");
-            } else {
-                delete $sh{$auditid};
-                next AUDITID;
-            }
-
             $log .= qq(\n);
             open( LOGFILE, ">>", "$logfile" ) and do {
                 print LOGFILE $log;
@@ -314,7 +273,8 @@ sub auid_to_user {
     unless ( $user = getpwuid($auid) ) {
         if ( $auid == 4294967295 ) {
             $user = '';
-        } else {
+        }
+        else {
             $user = $auid;
         }
     }
@@ -353,7 +313,8 @@ sub xlate_saddr {
             $ip       = hex( $addr[0] ) . '.' . hex( $addr[1] ) . '.' . hex( $addr[2] ) . '.' . hex( $addr[3] );
             $$r_saddr = ':::::FFFF:' . $ip;
             $$r_port  = $port;
-        } else {
+        }
+        else {
             $ip6 = "@ip6a[0 .. 3]" . ':';
             $ip6 .= "@ip6a[4 .. 7]" . ':';
             $ip6 .= "@ip6a[8 .. 11]" . ':';
@@ -367,12 +328,14 @@ sub xlate_saddr {
             $$r_saddr = $ip6;
             $$r_port  = $port;
         }
-    } elsif ( $family == 2 ) {
+    }
+    elsif ( $family == 2 ) {
         $port     = 256 * hex($port1) + hex($port2);
         $ip       = hex( $addr[0] ) . '.' . hex( $addr[1] ) . '.' . hex( $addr[2] ) . '.' . hex( $addr[3] );
         $$r_saddr = $ip;
         $$r_port  = $port;
-    } elsif ( $family == 1 ) {
+    }
+    elsif ( $family == 1 ) {
         $saddr =~ s/(^01..|00.+$)//g;
         $$r_saddr = pack( "H*", "$saddr" );
     }
@@ -429,7 +392,7 @@ INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
     q_depth = 65536
     overflow_action = ignore
 
-6) Replace /etc/audit/audit.rules and/or /etc/audit/rules.d/audit.rules with the following: (you may want to add/del to dir monitoring)
+6) Replace /etc/audit/audit.rules and/or /etc/audit/rules.d/audit.rules with the following: (you may want to add/del to dir monitoring).  YOU NEED A KEY DEFINED ( -k ) for audisp-simplify to log the event.
     # delete all existing rules
     -D
     # disable auditing during load
@@ -510,7 +473,9 @@ INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
         
 9) Restart the auditd service
 
-10) Done.  Now you can watch the simple audit logs in /var/log/audisp-simplify
+10) If you are seeing audit logs in journald, you can disable it with systemctl mask systemd-journald-audit.socket
+
+11) Done.  Now you can watch the simple audit logs in /var/log/audisp-simplify
 
 
 
@@ -554,4 +519,3 @@ If you are running SELinux, you may want to add the following to your local poli
     semodule_package -o local.pp -m local.mod
     semodule -i local.pp
 
-3) 
