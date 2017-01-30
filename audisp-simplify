@@ -10,6 +10,7 @@
 # 20150728 Kirby  v1.0.7
 # 20161007 Kirby  v1.0.8
 # 20170129 Kirby  v1.0.9
+# 20170129 Kirby  v1.0.10
 ################################################################################
 
 # LICENSE
@@ -34,6 +35,9 @@ umask 0077;
 
 # mitigation for bug with timezone
 $ENV{TZ} = strftime( "%Z", localtime() );
+
+# https://raw.githubusercontent.com/linux-audit/audit-documentation/master/specs/fields/field-dictionary.csv
+# https://access.redhat.com/documentation/en-US/Red_Hat_Enterprise_Linux/6/html/Security_Guide/app-Audit_Reference.html#sec-Audit_Events_Fields
 
 &Main;
 
@@ -88,45 +92,48 @@ sub Main {
             $sh{$auditid}{type} = $2;
 
             $sh{$auditid}{auditid}  = $auditid;
-            $sh{$auditid}{epoch}    = time;
-            $sh{$auditid}{date}     = strftime "%Y-%m-%d", localtime(time);
-            $sh{$auditid}{time}     = strftime "%H:%M:%S%z", localtime(time);
-            $sh{$auditid}{acct}     = $1 if ( $event =~ m| acct=(\S+)| );
-            $sh{$auditid}{addr}     = $1 if ( $event =~ m| addr=(\S+)| );
-            $sh{$auditid}{cmd}      = $1 if ( $event =~ m| cmd=(\S+)| );
-            $sh{$auditid}{cmd}      = pack( "H*", "$1" ) if ( $sh{$auditid}{cmd} =~ m|^([A-F0-9]+)$| );
-            $sh{$auditid}{cwd}      = $1 if ( $event =~ m|'cwd=(\S+)| );
-            $sh{$auditid}{exe}      = $1 if ( $event =~ m| exe=(\S+)| );
-            $sh{$auditid}{fp}       = $1 if ( $event =~ m| fp=([a-f0-9:]+)| );
-            $sh{$auditid}{hostname} = $1 if ( $event =~ m| hostname=(\S+)| );
-            $sh{$auditid}{key}      = $1 if ( $event =~ m| key="(\S+)"| );
-            $sh{$auditid}{op}       = $1 if ( $event =~ m|'op=(\S+)| );
-            $sh{$auditid}{origuser} = &auid_to_user($1) if ( $event =~ m| auid=(\d+)| );
+            # don't log myself
+            # check early to avoid unneccesary cpu usage
             $sh{$auditid}{pid}      = $1 if ( $event =~ m| pid=(\d+)| );
             $sh{$auditid}{ppid}     = $1 if ( $event =~ m| ppid=(\d+)| );
-            $sh{$auditid}{res}      = $1 if ( $event =~ m| res=(\d+)| );
-            $sh{$auditid}{ses}      = $1 if ( $event =~ m| ses=(\d+)| );
-            $sh{$auditid}{terminal} = $1 if ( $event =~ m| terminal=(\S+)| );
-            $sh{$auditid}{tty}      = $1 if ( $event =~ m| tty=(\S+)| );
-            $sh{$auditid}{user}     = &uid_to_user($1) if ( $event =~ m| uid=(\d+)| );
-
-            # don't log myself
             if ( $$ == ( defined $sh{$auditid}{pid} ? $sh{$auditid}{pid} : 0 ) ) {
                 next INPUT;
             }
             if ( $$ == ( defined $sh{$auditid}{ppid} ? $sh{$auditid}{ppid} : 0 ) ) {
                 next INPUT;
             }
+            $sh{$auditid}{epoch}     = time;
+            $sh{$auditid}{date}      = strftime "%Y-%m-%d", localtime(time);
+            $sh{$auditid}{time}      = strftime "%H:%M:%S%z", localtime(time);
+            $sh{$auditid}{acct}      = $1 if ( $event =~ m| acct=(\S+)| );
+            $sh{$auditid}{acct}      = pack( "H*", "$1" ) if ( $sh{$auditid}{acct} =~ m|^([A-F0-9]+)$| );
+            $sh{$auditid}{addr}      = $1 if ( $event =~ m| addr=(\S+)| );
+            $sh{$auditid}{cmd}       = $1 if ( $event =~ m| cmd=(\S+)| );
+            $sh{$auditid}{cmd}       = pack( "H*", "$1" ) if ( $sh{$auditid}{cmd} =~ m|^([A-F0-9]+)$| );
+            $sh{$auditid}{cwd}       = $1 if ( $event =~ m|'cwd=(\S+)| );
+            $sh{$auditid}{cwd}       = pack( "H*", "$1" ) if ( $sh{$auditid}{cwd} =~ m|^([A-F0-9]+)$| );
+            $sh{$auditid}{exe}       = $1 if ( $event =~ m| exe=(\S+)| );
+            $sh{$auditid}{exe}       = pack( "H*", "$1" ) if ( $sh{$auditid}{exe} =~ m|^([A-F0-9]+)$| );
+            $sh{$auditid}{exit}      = $1 if ( $event =~ m| exit=(\S+)| );
+            $sh{$auditid}{hostname}  = $1 if ( $event =~ m| hostname=(\S+)| );
+            $sh{$auditid}{key}       = $1 if ( $event =~ m| key="(\S+)"| );
+            $sh{$auditid}{name}      = $1 if ( $event =~ m| name=(\S+)| );
+            $sh{$auditid}{name}      = pack( "H*", "$1" ) if ( $sh{$auditid}{name} =~ m|^([A-F0-9]+)$| );
+            $sh{$auditid}{res}       = $1 if ( $event =~ m| res=(\d+)| );
+            $sh{$auditid}{result}    = $1 if ( $event =~ m| result=(\d+)| );
+            $sh{$auditid}{ses}       = $1 if ( $event =~ m| ses=(\d+)| );
+            $sh{$auditid}{success}   = $1 if ( $event =~ m| success=(\S+)| );
+            $sh{$auditid}{terminal}  = $1 if ( $event =~ m| terminal=(\S+)| );
+            $sh{$auditid}{tty}       = $1 if ( $event =~ m| tty=(\S+)| );
+            $sh{$auditid}{vm}        = $1 if ( $event =~ m| vm=(\S+)| );
+            $sh{$auditid}{uid}       = $1 if ( $event =~ m| uid=(\d+)| );
+            $sh{$auditid}{uid_user}  = &uid_to_user($1) if ( $event =~ m| uid=(\d+)| );
+            $sh{$auditid}{auid}      = $1 if ( $event =~ m| auid=(\d+)| );
+            $sh{$auditid}{auid_user} = &auid_to_user($1) if ( $event =~ m| auid=(\d+)| );
+
             if ( $event =~ m| saddr=([A-F0-9]+)| ) {
                 $saddr = $1;
                 &xlate_saddr( $saddr, \$sh{$auditid}{saddr}, \$sh{$auditid}{port} );
-            }
-
-            if ( $event =~ m| cwd=(\S+)| ) {
-                $sh{$auditid}{cwd} = $1;
-                if ( $sh{$auditid}{cwd} =~ m|^([A-F0-9]+)$| ) {
-                    $sh{$auditid}{cwd} = pack( "H*", "$1" );
-                }
             }
 
             if ( $event =~ m| argc=(\d+)| ) {
@@ -155,56 +162,6 @@ sub Main {
                 $sh{$auditid}{command} =~ s|\n| |g;
                 $sh{$auditid}{command} =~ s|\s+| |g;
             }
-
-            if ( $event =~ m| name=(\S+)| ) {
-                $sh{$auditid}{name} = $1;
-                if ( $sh{$auditid}{name} =~ /^([A-F0-9]+)$/ ) {
-                    $sh{$auditid}{name} = pack( "H*", "$1" );
-                }
-            }
-
-            if ( $event =~ m| exe=(\S+)| ) {
-                $sh{$auditid}{exe} = $1;
-                if ( $sh{$auditid}{exe} =~ /^([A-F0-9]+)$/ ) {
-                    $sh{$auditid}{exe} = pack( "H*", "$1" );
-                }
-            }
-
-            if ( $event =~ m| acct=(\S+)| ) {
-                $sh{$auditid}{acct} = $1;
-                if ( $sh{$auditid}{acct} =~ m|^([A-F0-9]+)$| ) {
-                    $sh{$auditid}{acct} = pack( "H*", "$1" );
-                }
-            }
-
-            # item is an array that usually shows the library after the first element.
-            # We will only grab the first one
-            if ( $event =~ m| item=(\d+)| ) {
-                $item = $1;
-                if ( ( $item > ( defined $sh{$auditid}{item} ? $sh{$auditid}{item} : -1 ) ) and ( $sh{$auditid}{name} ne '(null)' ) ) {
-                    next INPUT;
-                }
-                else {
-                    # Sometimes there are more than 1 PATH lines.
-                    # Choose the lowest item.
-                    $sh{$auditid}{item} = $item;
-                }
-            }
-
-            # item is an array that usually shows the library after the first element.
-            #
-#            if ( $event =~ m| item=(\d+)| ) {
-#                $item = $1;
-#                if ( ( $item > ( defined $sh{$auditid}{item} ? $sh{$auditid}{item} : -1 ) ) and ( $sh{$auditid}{name} ne '(null)' ) ) {
-#                    # Sometimes there are more than 1 PATH lines.
-#                    # Choose the highest item.
-#                    $sh{$auditid}{item} = $item;
-#                }
-#                else {
-#                    next INPUT;
-#                }
-#            }
-
         }
 
       AUDITID:
