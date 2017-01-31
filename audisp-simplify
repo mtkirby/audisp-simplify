@@ -12,6 +12,7 @@
 # 20170129 Kirby  v1.0.9
 # 20170129 Kirby  v1.0.10
 # 20170130 Kirby  v1.0.11
+# 20170130 Kirby  v1.0.12
 ################################################################################
 
 # LICENSE
@@ -60,7 +61,6 @@ sub Main {
     my $ignorekey;
     my %ignores;
     my $ignorestring;
-    my $item;
     my $key;
     my $log;
     my $logfile = '/var/log/audisp-simplify';
@@ -72,6 +72,7 @@ sub Main {
     my %errno;
     my %errcode;
     
+    # I realize that using the Errno module would be easier, but this takes less cpu.
     %errno = (
         1 => "EPERM",
         2 => "ENOENT",
@@ -435,7 +436,7 @@ sub Main {
             $sh{$auditid}{uid}       = $1 if ( $event =~ m| uid=(\d+)| );
             $sh{$auditid}{uid_user}  = &uid_to_user($1) if ( $event =~ m| uid=(\d+)| );
             $sh{$auditid}{auid}      = $1 if ( $event =~ m| auid=(\d+)| );
-            $sh{$auditid}{auid_user} = &auid_to_user($1) if ( $event =~ m| auid=(\d+)| );
+            $sh{$auditid}{auid_user} = &uid_to_user($1) if ( $event =~ m| auid=(\d+)| );
 
             if ( $event =~ m| exit=\D?(\d+)| ) {
                 if ( defined $errno{$1} ) {
@@ -500,7 +501,6 @@ sub Main {
 
             $log = '';
             foreach $subkey ( sort ( keys %{ $sh{$auditid} } ) ) {
-                next if ( $subkey eq "item" );
                 next if ( $subkey eq "argc" );
                 $sh{$auditid}{$subkey} =~ s|"||g;
                 $log .= qq($subkey="$sh{$auditid}{$subkey}" );
@@ -526,27 +526,14 @@ sub uid_to_user {
     my $user;
 
     unless ( $user = getpwuid($uid) ) {
-        $user = $uid;
-    }
-
-    return $user;
-}
-#################################################################################
-
-#################################################################################
-sub auid_to_user {
-
-    my $auid = shift;
-    my $user;
-
-    unless ( $user = getpwuid($auid) ) {
-        if ( $auid == 4294967295 ) {
+        if ( $uid == 4294967295 ) {
             $user = '';
         }
         else {
-            $user = $auid;
+            $user = $uid;
         }
     }
+
     return $user;
 }
 #################################################################################
@@ -622,22 +609,22 @@ README
 This program is an audisp plugin that will make audit events from the Linux Audit daemon human readable.
 It will look for execve, socketcall, bind, and connect system calls as well as filesystem changes (if you setup audit rules) and consolidate the events into a simple log format.
 The log is in key=value format for easy consumption from Splunk or other log analytic software.
-Here is a Splunk query that I run: source="/var/log/audisp-simplify"  |table time key tty ppid origuser user cwd exe name saddr command |sort _time desc 
-The logs include the origuser, which is the original login id.  This is beneficial for seeing who made the syscalls after su'ing to another user such as root.
+Here is a Splunk query that I run: source="/var/log/audisp-simplify"  |table time key tty ppid auid_user user cwd exe name saddr command |sort _time desc 
+The logs include the auid_user, which is the original login id.  This is beneficial for seeing who made the syscalls after su'ing to another user such as root.
 
 Here is an execve syscall example of a shell command, uname -a, executed as myself after su'ing to root:
-type=EXECVE key=EXECVE auditid=143600 date="2013-09-29" time="13:33:08-0500" node="goemon.lunari.net" tty=pts1 ppid=2437 pid=8189 exe="/usr/bin/uname" origuser=mkirby user=root cwd="/var/log" command="uname -a"
+type=EXECVE key=EXECVE auditid=143600 date="2013-09-29" time="13:33:08-0500" node="goemon.lunari.net" tty=pts1 ppid=2437 pid=8189 exe="/usr/bin/uname" auid_user=mkirby user=root cwd="/var/log" command="uname -a"
 
 
 Here is an example of /etc/hosts being edited:
-type= key=FILE auditid=143645 date="2013-09-29" time="13:36:19-0500" node="goemon.lunari.net" tty=pts1 ppid=2437 pid=8208 exe="/usr/bin/vi" name="/etc/hosts~" user=root origuser=mkirby cwd="/var/log"
+type= key=FILE auditid=143645 date="2013-09-29" time="13:36:19-0500" node="goemon.lunari.net" tty=pts1 ppid=2437 pid=8208 exe="/usr/bin/vi" name="/etc/hosts~" user=root auid_user=mkirby cwd="/var/log"
 
     
 Here is a connect syscall example of an egress connection to mkirby.org:
-type=SOCKADDR key=CONNECT auditid=143682 date="2013-09-29" time="13:38:49-0500" node="goemon.lunari.net" tty=pts1 ppid=2437 pid=8229 origuser=mkirby user=root saddr="184.82.178.105 port 443" exe="/usr/bin/telnet"
+type=SOCKADDR key=CONNECT auditid=143682 date="2013-09-29" time="13:38:49-0500" node="goemon.lunari.net" tty=pts1 ppid=2437 pid=8229 auid_user=mkirby user=root saddr="184.82.178.105 port 443" exe="/usr/bin/telnet"
     
 Here is a bind syscall example of httpd binding to port 443:
-type=SOCKADDR key=BIND auditid=143745 date="2013-09-29" time="13:39:31-0500" node="goemon.lunari.net" tty=(none) ppid=1 pid=8252 origuser=4294967295 user=root saddr="0.0.0.0 port 443" exe="/usr/sbin/httpd"
+type=SOCKADDR key=BIND auditid=143745 date="2013-09-29" time="13:39:31-0500" node="goemon.lunari.net" tty=(none) ppid=1 pid=8252 auid=4294967295 user=root saddr="0.0.0.0 port 443" exe="/usr/sbin/httpd"
     
     
     
