@@ -13,6 +13,8 @@
 # 20170129 Kirby  v1.0.10
 # 20170130 Kirby  v1.0.11
 # 20170130 Kirby  v1.0.12
+# 20170131 Kirby  v2.0
+# 20170201 Kirby  v2.0.1 
 ################################################################################
 
 # LICENSE
@@ -31,12 +33,14 @@
 #    along with audisp-simplify; if not, write to the Free Software
 #    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
-use POSIX qw(strftime);
+use POSIX qw(strftime tzset);
+use Errno;
 use strict;
 umask 0077;
 
-# mitigation for bug with timezone
-$ENV{TZ} = strftime( "%Z", localtime() );
+# enable if timezone has problems
+#$ENV{TZ} = strftime( "%Z", localtime() );
+#tzset;
 
 # https://raw.githubusercontent.com/linux-audit/audit-documentation/master/specs/fields/field-dictionary.csv
 # https://access.redhat.com/documentation/en-US/Red_Hat_Enterprise_Linux/6/html/Security_Guide/app-Audit_Reference.html#sec-Audit_Events_Fields
@@ -48,329 +52,34 @@ sub Main {
     my $argc;
     my $args;
     my $auditid;
-    my @ausearch;
-    my $ausearch;
     my $cmd;
     my @command;
     my @cleancmd;
-    my $date;
-    my $epoch;
+    my $err;
+    my %errcode;
+    my %errdesc;
+    my $errno;
     my $event;
-    my $exe;
     my $ignorefile = '/etc/audisp/simplify.ignores';
     my $ignorekey;
     my %ignores;
     my $ignorestring;
-    my $key;
+    my $item;
     my $log;
     my $logfile = '/var/log/audisp-simplify';
-    my $saddr;
     my %sh;
     my $subkey;
     my $time;
-    my %tracker;
-    my %errno;
-    my %errcode;
-    
-    # I realize that using the Errno module would be easier, but this takes less cpu.
-    %errno = (
-        1 => "EPERM",
-        2 => "ENOENT",
-        3 => "ESRCH",
-        4 => "EINTR",
-        5 => "EIO",
-        6 => "ENXIO",
-        7 => "E2BIG",
-        8 => "ENOEXEC",
-        9 => "EBADF",
-        10 => "ECHILD",
-        11 => "EAGAIN",
-        12 => "ENOMEM",
-        13 => "EACCES",
-        14 => "EFAULT",
-        15 => "ENOTBLK",
-        16 => "EBUSY",
-        17 => "EEXIST",
-        18 => "EXDEV",
-        19 => "ENODEV",
-        20 => "ENOTDIR",
-        21 => "EISDIR",
-        22 => "EINVAL",
-        23 => "ENFILE",
-        24 => "EMFILE",
-        25 => "ENOTTY",
-        26 => "ETXTBSY",
-        27 => "EFBIG",
-        28 => "ENOSPC",
-        29 => "ESPIPE",
-        30 => "EROFS",
-        31 => "EMLINK",
-        32 => "EPIPE",
-        33 => "EDOM",
-        34 => "ERANGE",
-        35 => "EDEADLK",
-        36 => "ENAMETOOLONG",
-        37 => "ENOLCK",
-        38 => "ENOSYS",
-        39 => "ENOTEMPTY",
-        40 => "ELOOP",
-        42 => "ENOMSG",
-        43 => "EIDRM",
-        44 => "ECHRNG",
-        45 => "EL2NSYNC",
-        46 => "EL3HLT",
-        47 => "EL3RST",
-        48 => "ELNRNG",
-        49 => "EUNATCH",
-        50 => "ENOCSI",
-        51 => "EL2HLT",
-        52 => "EBADE",
-        53 => "EBADR",
-        54 => "EXFULL",
-        55 => "ENOANO",
-        56 => "EBADRQC",
-        57 => "EBADSLT",
-        59 => "EBFONT",
-        60 => "ENOSTR",
-        61 => "ENODATA",
-        62 => "ETIME",
-        63 => "ENOSR",
-        64 => "ENONET",
-        65 => "ENOPKG",
-        66 => "EREMOTE",
-        67 => "ENOLINK",
-        68 => "EADV",
-        69 => "ESRMNT",
-        70 => "ECOMM",
-        71 => "EPROTO",
-        72 => "EMULTIHOP",
-        73 => "EDOTDOT",
-        74 => "EBADMSG",
-        75 => "EOVERFLOW",
-        76 => "ENOTUNIQ",
-        77 => "EBADFD",
-        78 => "EREMCHG",
-        79 => "ELIBACC",
-        80 => "ELIBBAD",
-        81 => "ELIBSCN",
-        82 => "ELIBMAX",
-        83 => "ELIBEXEC",
-        84 => "EILSEQ",
-        85 => "ERESTART",
-        86 => "ESTRPIPE",
-        87 => "EUSERS",
-        88 => "ENOTSOCK",
-        89 => "EDESTADDRREQ",
-        90 => "EMSGSIZE",
-        91 => "EPROTOTYPE",
-        92 => "ENOPROTOOPT",
-        93 => "EPROTONOSUPPORT",
-        94 => "ESOCKTNOSUPPORT",
-        95 => "EOPNOTSUPP",
-        96 => "EPFNOSUPPORT",
-        97 => "EAFNOSUPPORT",
-        98 => "EADDRINUSE",
-        99 => "EADDRNOTAVAIL",
-        100 => "ENETDOWN",
-        101 => "ENETUNREACH",
-        102 => "ENETRESET",
-        103 => "ECONNABORTED",
-        104 => "ECONNRESET",
-        105 => "ENOBUFS",
-        106 => "EISCONN",
-        107 => "ENOTCONN",
-        108 => "ESHUTDOWN",
-        109 => "ETOOMANYREFS",
-        110 => "ETIMEDOUT",
-        111 => "ECONNREFUSED",
-        112 => "EHOSTDOWN",
-        113 => "EHOSTUNREACH",
-        114 => "EALREADY",
-        115 => "EINPROGRESS",
-        116 => "ESTALE",
-        117 => "EUCLEAN",
-        118 => "ENOTNAM",
-        119 => "ENAVAIL",
-        120 => "EISNAM",
-        121 => "EREMOTEIO",
-        122 => "EDQUOT",
-        123 => "ENOMEDIUM",
-        124 => "EMEDIUMTYPE",
-        125 => "ECANCELED",
-        126 => "ENOKEY",
-        127 => "EKEYEXPIRED",
-        128 => "EKEYREVOKED",
-        129 => "EKEYREJECTED",
-        130 => "EOWNERDEAD",
-        131 => "ENOTRECOVERABLE",
-        132 => "ERFKILL",
-        133 => "EHWPOISON",
-        514 => "ERESTARTNOHAND",
-        515 => "ENOIOCTLCMD",
-        516 => "ERESTART_RESTARTBLOCK",
-        517 => "EPROBE_DEFER",
-        518 => "EOPENSTALE",
-        521 => "EBADHANDLE",
-        522 => "ENOTSYNC",
-        523 => "EBADCOOKIE",
-        524 => "ENOTSUPP",
-        525 => "ETOOSMALL",
-        526 => "ESERVERFAULT",
-        527 => "EBADTYPE",
-        528 => "EJUKEBOX",
-        529 => "EIOCBQUEUED",
-        530 => "ERECALLCONFLICT"
-    );
-    
-    
-    %errcode = (
-        EPERM => "Operation not permitted",
-        ENOENT => "No such file or directory",
-        ESRCH => "No such process",
-        EINTR => "Interrupted system call",
-        EIO => "I/O error",
-        ENXIO => "No such device or address",
-        E2BIG => "Argument list too long",
-        ENOEXEC => "Exec format error",
-        EBADF => "Bad file number",
-        ECHILD => "No child processes",
-        EAGAIN => "Try again",
-        ENOMEM => "Out of memory",
-        EACCES => "Permission denied",
-        EFAULT => "Bad address",
-        ENOTBLK => "Block device required",
-        EBUSY => "Device or resource busy",
-        EEXIST => "File exists",
-        EXDEV => "Cross-device link",
-        ENODEV => "No such device",
-        ENOTDIR => "Not a directory",
-        EISDIR => "Is a directory",
-        EINVAL => "Invalid argument",
-        ENFILE => "File table overflow",
-        EMFILE => "Too many open files",
-        ENOTTY => "Not a typewriter",
-        ETXTBSY => "Text file busy",
-        EFBIG => "File too large",
-        ENOSPC => "No space left on device",
-        ESPIPE => "Illegal seek",
-        EROFS => "Read-only file system",
-        EMLINK => "Too many links",
-        EPIPE => "Broken pipe",
-        EDOM => "Math argument out of domain of function",
-        ERANGE => "Math result not representable",
-        EDEADLK => "Resource deadlock would occur",
-        ENAMETOOLONG => "File name too long",
-        ENOLCK => "No record locks available",
-        ENOSYS => "Function not implemented/Invalid system call number",
-        ENOTEMPTY => "Directory not empty",
-        ELOOP => "Too many symbolic links encountered",
-        ENOMSG => "No message of desired type",
-        EIDRM => "Identifier removed",
-        ECHRNG => "Channel number out of range",
-        EL2NSYNC => "Level 2 not synchronized",
-        EL3HLT => "Level 3 halted",
-        EL3RST => "Level 3 reset",
-        ELNRNG => "Link number out of range",
-        EUNATCH => "Protocol driver not attached",
-        ENOCSI => "No CSI structure available",
-        EL2HLT => "Level 2 halted",
-        EBADE => "Invalid exchange",
-        EBADR => "Invalid request descriptor",
-        EXFULL => "Exchange full",
-        ENOANO => "No anode",
-        EBADRQC => "Invalid request code",
-        EBADSLT => "Invalid slot",
-        EBFONT => "Bad font file format",
-        ENOSTR => "Device not a stream",
-        ENODATA => "No data available",
-        ETIME => "Timer expired",
-        ENOSR => "Out of streams resources",
-        ENONET => "Machine is not on the network",
-        ENOPKG => "Package not installed",
-        EREMOTE => "Object is remote",
-        ENOLINK => "Link has been severed",
-        EADV => "Advertise error",
-        ESRMNT => "Srmount error",
-        ECOMM => "Communication error on send",
-        EPROTO => "Protocol error",
-        EMULTIHOP => "Multihop attempted",
-        EDOTDOT => "RFS specific error",
-        EBADMSG => "Not a data message",
-        EOVERFLOW => "Value too large for defined data type",
-        ENOTUNIQ => "Name not unique on network",
-        EBADFD => "File descriptor in bad state",
-        EREMCHG => "Remote address changed",
-        ELIBACC => "Can not access a needed shared library",
-        ELIBBAD => "Accessing a corrupted shared library",
-        ELIBSCN => ".lib section in a.out corrupted",
-        ELIBMAX => "Attempting to link in too many shared libraries",
-        ELIBEXEC => "Cannot exec a shared library directly",
-        EILSEQ => "Illegal byte sequence",
-        ERESTART => "Interrupted system call should be restarted",
-        ESTRPIPE => "Streams pipe error",
-        EUSERS => "Too many users",
-        ENOTSOCK => "Socket operation on non-socket",
-        EDESTADDRREQ => "Destination address required",
-        EMSGSIZE => "Message too long",
-        EPROTOTYPE => "Protocol wrong type for socket",
-        ENOPROTOOPT => "Protocol not available",
-        EPROTONOSUPPORT => "Protocol not supported",
-        ESOCKTNOSUPPORT => "Socket type not supported",
-        EOPNOTSUPP => "Operation not supported on transport endpoint",
-        EPFNOSUPPORT => "Protocol family not supported",
-        EAFNOSUPPORT => "Address family not supported by protocol",
-        EADDRINUSE => "Address already in use",
-        EADDRNOTAVAIL => "Cannot assign requested address",
-        ENETDOWN => "Network is down",
-        ENETUNREACH => "Network is unreachable",
-        ENETRESET => "Network dropped connection because of reset",
-        ECONNABORTED => "Software caused connection abort",
-        ECONNRESET => "Connection reset by peer",
-        ENOBUFS => "No buffer space available",
-        EISCONN => "Transport endpoint is already connected",
-        ENOTCONN => "Transport endpoint is not connected",
-        ESHUTDOWN => "Cannot send after transport endpoint shutdown",
-        ETOOMANYREFS => "Too many references: cannot splice",
-        ETIMEDOUT => "Connection timed out",
-        ECONNREFUSED => "Connection refused",
-        EHOSTDOWN => "Host is down",
-        EHOSTUNREACH => "No route to host",
-        EALREADY => "Operation already in progress",
-        EINPROGRESS => "Operation now in progress",
-        ESTALE => "Stale file handle",
-        EUCLEAN => "Structure needs cleaning",
-        ENOTNAM => "Not a XENIX named type file",
-        ENAVAIL => "No XENIX semaphores available",
-        EISNAM => "Is a named type file",
-        EREMOTEIO => "Remote I/O error",
-        EDQUOT => "Quota exceeded",
-        ENOMEDIUM => "No medium found",
-        EMEDIUMTYPE => "Wrong medium type",
-        ECANCELED => "Operation Canceled",
-        ENOKEY => "Required key not available",
-        EKEYEXPIRED => "Key has expired",
-        EKEYREVOKED => "Key has been revoked",
-        EKEYREJECTED => "Key was rejected by service",
-        EOWNERDEAD => "Owner died",
-        ENOTRECOVERABLE => "State not recoverable",
-        ERFKILL => "Operation not possible due to RF-kill",
-        EHWPOISON => "Memory page has hardware error",
-        ERESTARTNOHAND => "restart if no handler..",
-        ENOIOCTLCMD => "No ioctl command",
-        ERESTART_RESTARTBLOCK => "restart by calling sys_restart_syscall",
-        EPROBE_DEFER => "Driver requests probe retry",
-        EOPENSTALE => "open found a stale dentry",
-        EBADHANDLE => "Illegal NFS file handle",
-        ENOTSYNC => "Update synchronization mismatch",
-        EBADCOOKIE => "Cookie is stale",
-        ENOTSUPP => "Operation is not supported",
-        ETOOSMALL => "Buffer or request is too small",
-        ESERVERFAULT => "An untranslatable error occurred",
-        EBADTYPE => "Type not supported by server",
-        EJUKEBOX => "Request initiated, but will not complete before timeout",
-        EIOCBQUEUED => "iocb queued, will get completion event",
-        ERECALLCONFLICT => "conflict with recalled state"
-    );
+
+    #
+    # Cache all the error codes rather than calling Errno on each event.
+    #
+    foreach $err (keys (%!)) {
+        $!               = eval "Errno::$err";
+        $errno           = $! + 0;
+        $errcode{$errno} = $err;
+        $errdesc{$err}   = "$!";
+    }
     
     if ( -f "$ignorefile" ) {
         open( IG, '<', "$ignorefile" );
@@ -389,75 +98,135 @@ sub Main {
     while (<STDIN>) {
         chomp;
         $event = $_;
-        if ( $event =~ m|^node=(\S+) type=(\S+) msg=audit\(\d+\.\d+:(\d+)\): | ) {
-            $auditid            = $3;
-            $sh{$auditid}{node} = $1;
-            $sh{$auditid}{type} = $2;
+        if ( $event =~ m|^node=(\S+) type=\S+ msg=audit\(\d+\.\d+:(\d+)\): | ) {
+            $auditid                  = $2;
+            $sh{$auditid}{node}       = $1;
+            $sh{$auditid}{auditid}    = $auditid;
+            $sh{$auditid}{pid}        = $1 if ( $event =~ m| pid=(\d+)| );
+            $sh{$auditid}{ppid}       = $1 if ( $event =~ m| ppid=(\d+)| );
+            $sh{$auditid}{epoch}      = time;
+            $sh{$auditid}{date}       = strftime "%Y-%m-%d", localtime(time);
+            $sh{$auditid}{time}       = strftime "%H:%M:%S%z", localtime(time);
+            $sh{$auditid}{res}        = $1 if ( $event =~ m| res=(\w+)| );
+            $sh{$auditid}{ses}        = $1 if ( $event =~ m| ses=(\d+)| );
+            $sh{$auditid}{terminal}   = $1 if ( $event =~ m| terminal=(\S+)| );
+            $sh{$auditid}{tty}        = $1 if ( $event =~ m| tty=(\S+)| );
+            $sh{$auditid}{exit}       = $1 if ( $event =~ m| exit=(-?\d+)| );
+            $sh{$auditid}{key}        = $1 if ( $event =~ m| key="([^"]+)"| );
+            $sh{$auditid}{seresult}   = $1 if ( $event =~ m| seresult=(\w+)| );
+            $sh{$auditid}{oldcontext} = $1 if ( $event =~ m| oldcontext=(\S+)| );
+            $sh{$auditid}{newcontext} = $1 if ( $event =~ m| newcontext=(\S+)| );
+            $sh{$auditid}{subj}       = $1 if ( $event =~ m| subj=(\S+)| );
 
-            $sh{$auditid}{auditid}  = $auditid;
-            # don't log myself
-            # check early to avoid unneccesary cpu usage
-            $sh{$auditid}{pid}      = $1 if ( $event =~ m| pid=(\d+)| );
-            $sh{$auditid}{ppid}     = $1 if ( $event =~ m| ppid=(\d+)| );
-            if ( $$ == ( defined $sh{$auditid}{pid} ? $sh{$auditid}{pid} : 0 ) ) {
-                next INPUT;
+            if ( $event =~ m| uid=(\d+)| ) {
+                $sh{$auditid}{uid} = $1;
+                $sh{$auditid}{uid_user} = getpwuid($1) || 'unset';
             }
-            if ( $$ == ( defined $sh{$auditid}{ppid} ? $sh{$auditid}{ppid} : 0 ) ) {
-                next INPUT;
+            if ( $event =~ m| auid=(\d+)| ) {
+                $sh{$auditid}{auid} = $1;
+                $sh{$auditid}{auid_user} = getpwuid($1) || 'unset';
             }
-            $sh{$auditid}{epoch}     = time;
-            $sh{$auditid}{date}      = strftime "%Y-%m-%d", localtime(time);
-            $sh{$auditid}{time}      = strftime "%H:%M:%S%z", localtime(time);
-            $sh{$auditid}{acct}      = $1 if ( $event =~ m| acct=(\S+)| );
-            $sh{$auditid}{acct}      = pack( "H*", "$1" ) if ( $sh{$auditid}{acct} =~ m|^([A-F0-9]+)$| );
-            $sh{$auditid}{addr}      = $1 if ( $event =~ m| addr=(\S+)| );
-            $sh{$auditid}{comm}      = $1 if ( $event =~ m| comm=(\S+)| );
-            $sh{$auditid}{cmd}       = $1 if ( $event =~ m| cmd=(\S+)| );
-            $sh{$auditid}{cmd}       = pack( "H*", "$1" ) if ( $sh{$auditid}{cmd} =~ m|^([A-F0-9]+)$| );
-            $sh{$auditid}{cwd}       = $1 if ( $event =~ m|'cwd=(\S+)| );
-            $sh{$auditid}{cwd}       = pack( "H*", "$1" ) if ( $sh{$auditid}{cwd} =~ m|^([A-F0-9]+)$| );
-            $sh{$auditid}{exe}       = $1 if ( $event =~ m| exe=(\S+)| );
-            $sh{$auditid}{exe}       = pack( "H*", "$1" ) if ( $sh{$auditid}{exe} =~ m|^([A-F0-9]+)$| );
-            $sh{$auditid}{exit}      = $1 if ( $event =~ m| exit=(\S+)| );
-            $sh{$auditid}{hostname}  = $1 if ( $event =~ m| hostname=(\S+)| );
-            $sh{$auditid}{key}       = $1 if ( $event =~ m| key="(\S+)"| );
-            $sh{$auditid}{name}      = $1 if ( $event =~ m| name=(\S+)| );
-            $sh{$auditid}{name}      = pack( "H*", "$1" ) if ( $sh{$auditid}{name} =~ m|^([A-F0-9]+)$| );
-            $sh{$auditid}{proctitle} = $1 if ( $event =~ m| proctitle=(\S+)| );
-            $sh{$auditid}{proctitle} = pack( "H*", "$1" ) if ( $sh{$auditid}{proctitle} =~ m|^([A-F0-9]+)$| );
-            $sh{$auditid}{proctitle} =~ s| | |g;
-            $sh{$auditid}{res}       = $1 if ( $event =~ m| res=(\d+)| );
-            $sh{$auditid}{result}    = $1 if ( $event =~ m| result=(\d+)| );
-            $sh{$auditid}{ses}       = $1 if ( $event =~ m| ses=(\d+)| );
-            $sh{$auditid}{success}   = $1 if ( $event =~ m| success=(\S+)| );
-            $sh{$auditid}{terminal}  = $1 if ( $event =~ m| terminal=(\S+)| );
-            $sh{$auditid}{tty}       = $1 if ( $event =~ m| tty=(\S+)| );
-            $sh{$auditid}{vm}        = $1 if ( $event =~ m| vm=(\S+)| );
-            $sh{$auditid}{uid}       = $1 if ( $event =~ m| uid=(\d+)| );
-            $sh{$auditid}{uid_user}  = &uid_to_user($1) if ( $event =~ m| uid=(\d+)| );
-            $sh{$auditid}{auid}      = $1 if ( $event =~ m| auid=(\d+)| );
-            $sh{$auditid}{auid_user} = &uid_to_user($1) if ( $event =~ m| auid=(\d+)| );
+            if ( $event =~ m| euid=(\d+)| ) {
+                $sh{$auditid}{euid} = $1;
+                $sh{$auditid}{euid_user} = getpwuid($1) || 'unset';
+            }
 
-            if ( $event =~ m| exit=\D?(\d+)| ) {
-                if ( defined $errno{$1} ) {
-                    $sh{$auditid}{errcode} = $errno{$1};
-                    $sh{$auditid}{errdesc} = qq("$errcode{$sh{$auditid}{errcode}}");
+            if ( $event =~ m| type=(\S+)| ) {
+                unless ( $sh{$auditid}{types} =~ m|$1| ) {
+                    $sh{$auditid}{types} = defined $sh{$auditid}{types} ? "$sh{$auditid}{types},$1" : $1;
+                }
+            }
+
+            #
+            # Some keys are unpredictable.
+            # Some have values wrapped in quotes, some don't, and some are encoded
+            #
+            if ( $event =~ m| acct="([^"]+)"| ) {
+                $sh{$auditid}{acct} = $1;
+            } elsif ( $event =~ m| acct=([A-F0-9]+)| ) {
+                $sh{$auditid}{acct} = pack( "H*", "$1" );
+            } elsif ( $event =~ m| acct=(\S+)| ) {
+                $sh{$auditid}{acct} = $1;
+            }
+
+            if ( $event =~ m| cmd="([^"]+)"| ) {
+                $sh{$auditid}{cmd} = $1;
+            } elsif ( $event =~ m| cmd=([A-F0-9]+)| ) {
+                $sh{$auditid}{cmd} = pack( "H*", "$1" );
+            } elsif ( $event =~ m| cmd=(\S+)| ) {
+                $sh{$auditid}{cmd} = $1;
+            }
+
+            if ( $event =~ m|[' ]cwd="([^"]+)"| ) {
+                $sh{$auditid}{cwd} = $1;
+            } elsif ( $event =~ m|[' ]cwd=([A-F0-9]+)| ) {
+                $sh{$auditid}{cwd} = pack( "H*", "$1" );
+            } elsif ( $event =~ m|[' ]cwd=(\S+)| ) {
+                $sh{$auditid}{cwd} = $1;
+            }
+
+            if ( $event =~ m|[' ]unit="([^"]+)"| ) {
+                $sh{$auditid}{unit} = $1;
+            } elsif ( $event =~ m|[' ]unit=([A-F0-9]+)| ) {
+                $sh{$auditid}{unit} = pack( "H*", "$1" );
+            } elsif ( $event =~ m|[' ]unit=(\S+)| ) {
+                $sh{$auditid}{unit} = $1;
+            }
+
+            if ( $event =~ m| exe="([^"]+)"| ) {
+                $sh{$auditid}{exe} = $1;
+            } elsif ( $event =~ m| exe=([A-F0-9]+)| ) {
+                $sh{$auditid}{exe} = pack( "H*", "$1" );
+            } elsif ( $event =~ m| exe=(\S+)| ) {
+                $sh{$auditid}{exe} = $1;
+            }
+
+            if ( $event =~ m|[' ]op="([^"]+)"| ) {
+                $sh{$auditid}{op} = $1;
+            } elsif ( $event =~ m|[' ]op=([A-F0-9]+)| ) {
+                $sh{$auditid}{op} = pack( "H*", "$1" );
+            } elsif ( $event =~ m|[' ]op=(\S+)| ) {
+                $sh{$auditid}{op} = $1;
+            }
+
+            if ( $event =~ m| vm="([^"]+)"| ) {
+                $sh{$auditid}{vm} = $1;
+            } elsif ( $event =~ m| vm=([A-F0-9]+)| ) {
+                $sh{$auditid}{vm} = pack( "H*", "$1" );
+            } elsif ( $event =~ m| vm=(\S+)| ) {
+                $sh{$auditid}{vm} = $1;
+            }
+
+            if ( $event =~ m| proctitle="([^"]+)"| ) {
+                $sh{$auditid}{proctitle} = $1;
+                $sh{$auditid}{proctitle} =~ tr/a-zA-Z0-9\-_\[\]\{\}\.,\<\>\?\/ \!\@\#\$\%\^\&\*\(\);:/ /dc;
+            } elsif ( $event =~ m| proctitle=([A-F0-9]+)| ) {
+                $sh{$auditid}{proctitle} = pack( "H*", "$1" );
+                $sh{$auditid}{proctitle} =~ tr/a-zA-Z0-9\-_\[\]\{\}\.,\<\>\?\/ \!\@\#\$\%\^\&\*\(\);:/ /dc;
+            } elsif ( $event =~ m| proctitle=(\S+)| ) {
+                $sh{$auditid}{proctitle} = $1;
+                $sh{$auditid}{proctitle} =~ tr/a-zA-Z0-9\-_\[\]\{\}\.,\<\>\?\/ \!\@\#\$\%\^\&\*\(\);:/ /dc;
+            }
+
+            if ( $event =~ m| exit=-?(\d+)| ) {
+                if ( defined $errcode{$1} ) {
+                    $sh{$auditid}{errcode} = $errcode{$1};
+                    $sh{$auditid}{errdesc} = $errdesc{$sh{$auditid}{errcode}};
                 }
             }
             if ( $event =~ m| saddr=([A-F0-9]+)| ) {
-                $saddr = $1;
-                &xlate_saddr( $saddr, \$sh{$auditid}{saddr}, \$sh{$auditid}{port} );
+                &xlate_saddr( $1, \$sh{$auditid}{saddr}, \$sh{$auditid}{port} );
             }
 
             if ( $event =~ m| argc=(\d+)| ) {
                 $argc = $1;
                 $args = $1 if ( $event =~ m| argc=\d+( .*)| );
                 if ( $argc > ( defined $sh{$auditid}{argc} ? $sh{$auditid}{argc} : 0 ) ) {
+
                     # Sometimes there are more than 1 EXECVE lines with missing args.
                     # Choose the highest argc.
                     $sh{$auditid}{argc} = $argc;
-                }
-                else {
+                } else {
                     next INPUT;
                 }
                 @command = split( /\s+a\d+=/, $args );
@@ -475,6 +244,24 @@ sub Main {
                 $sh{$auditid}{command} =~ s|\n| |g;
                 $sh{$auditid}{command} =~ s|\s+| |g;
             }
+
+            # Sometimes there are more than 1 PATH lines.
+            # Choose the highest item.
+            if ( $event =~ m| item=(\d+)| ) {
+                $item = $1;
+                if ( ( $item > ( defined $sh{$auditid}{item} ? $sh{$auditid}{item} : -1 ) )
+                and ( $event !~ m| name='?\(null\)'?| ) ) {
+                    if ( $event =~ m| name="([^"]+)"| ) {
+                        $sh{$auditid}{name} = $1;
+                    } elsif ( $event =~ m| name=([A-F0-9]+)| ) {
+                        $sh{$auditid}{name} = pack( "H*", "$1" );
+                    } elsif ( $event =~ m| name=(\S+)| ) {
+                        $sh{$auditid}{name} = $1;
+                    }
+                }
+            } else {
+                next INPUT;
+            }
         }
 
       AUDITID:
@@ -482,13 +269,20 @@ sub Main {
 
             # audits do not arrive in order.
             # wait a few seconds before logging.
-            next AUDITID if ( time < $sh{$auditid}{epoch} + 3 );
+            $time = time;
+            next AUDITID if ( $time < $sh{$auditid}{epoch} + 3 );
 
-            # only log entries with a user-defined key
-            unless ( defined $sh{$auditid}{key} ) {
+            # don't log myself
+            if ( ( $sh{$auditid}{pid} == $$ ) or ( $sh{$auditid}{ppid} == $$ ) ) {
                 delete $sh{$auditid};
                 next AUDITID;
             }
+
+            # Uncomment to only log entries with a user-defined key
+            # unless ( defined $sh{$auditid}{key} ) {
+            #     delete $sh{$auditid};
+            #     next AUDITID;
+            # }
 
             foreach $ignorekey ( keys %ignores ) {
                 foreach $ignorestring ( @{ $ignores{$ignorekey} } ) {
@@ -502,6 +296,8 @@ sub Main {
             $log = '';
             foreach $subkey ( sort ( keys %{ $sh{$auditid} } ) ) {
                 next if ( $subkey eq "argc" );
+                next if ( $subkey eq "epoch" );
+                next if ( $subkey eq "item" );
                 $sh{$auditid}{$subkey} =~ s|"||g;
                 $log .= qq($subkey="$sh{$auditid}{$subkey}" );
             }
@@ -518,25 +314,6 @@ sub Main {
     return 0;
 
 }
-
-#################################################################################
-sub uid_to_user {
-
-    my $uid = shift;
-    my $user;
-
-    unless ( $user = getpwuid($uid) ) {
-        if ( $uid == 4294967295 ) {
-            $user = '';
-        }
-        else {
-            $user = $uid;
-        }
-    }
-
-    return $user;
-}
-#################################################################################
 
 #################################################################################
 sub xlate_saddr {
@@ -569,8 +346,7 @@ sub xlate_saddr {
             $ip       = hex( $addr[0] ) . '.' . hex( $addr[1] ) . '.' . hex( $addr[2] ) . '.' . hex( $addr[3] );
             $$r_saddr = ':::::FFFF:' . $ip;
             $$r_port  = $port;
-        }
-        else {
+        } else {
             $ip6 = "@ip6a[0 .. 3]" . ':';
             $ip6 .= "@ip6a[4 .. 7]" . ':';
             $ip6 .= "@ip6a[8 .. 11]" . ':';
@@ -584,14 +360,12 @@ sub xlate_saddr {
             $$r_saddr = $ip6;
             $$r_port  = $port;
         }
-    }
-    elsif ( $family == 2 ) {
+    } elsif ( $family == 2 ) {
         $port     = 256 * hex($port1) + hex($port2);
         $ip       = hex( $addr[0] ) . '.' . hex( $addr[1] ) . '.' . hex( $addr[2] ) . '.' . hex( $addr[3] );
         $$r_saddr = $ip;
         $$r_port  = $port;
-    }
-    elsif ( $family == 1 ) {
+    } elsif ( $family == 1 ) {
         $saddr =~ s/(^01..|00.+$)//g;
         $$r_saddr = pack( "H*", "$saddr" );
     }
@@ -609,26 +383,25 @@ README
 This program is an audisp plugin that will make audit events from the Linux Audit daemon human readable.
 It will look for execve, socketcall, bind, and connect system calls as well as filesystem changes (if you setup audit rules) and consolidate the events into a simple log format.
 The log is in key=value format for easy consumption from Splunk or other log analytic software.
-Here is a Splunk query that I run: source="/var/log/audisp-simplify"  |table time key tty ppid auid_user user cwd exe name saddr command |sort _time desc 
+Here is a Splunk query that I run: source="/var/log/audisp-simplify"  |table time key tty ppid auid_user uid_user cwd exe command |sort _time desc 
 The logs include the auid_user, which is the original login id.  This is beneficial for seeing who made the syscalls after su'ing to another user such as root.
 
-Here is an execve syscall example of a shell command, uname -a, executed as myself after su'ing to root:
-type=EXECVE key=EXECVE auditid=143600 date="2013-09-29" time="13:33:08-0500" node="goemon.lunari.net" tty=pts1 ppid=2437 pid=8189 exe="/usr/bin/uname" auid_user=mkirby user=root cwd="/var/log" command="uname -a"
+Here is an execve syscall example of a shell command, ps -efww, executed as myself after su'ing to root:
+auditid="213706" auid="1000" auid_user="mkirby" command="ps -efww" cwd="/root" date="2017-02-02" euid="0" euid_user="root" exe="/usr/bin/ps" exit="0" key="EXECVE" node="goemon.mkirby.org" pid="4644" ppid="4572" proctitle="ps -efww" ses="814" subj="unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023" time="01:28:19+0000" tty="pts3" types="SYSCALL,EXECVE,CWD,PATH,PROCTITLE,EOE" uid="0" uid_user="root" 
 
 
-Here is an example of /etc/hosts being edited:
-type= key=FILE auditid=143645 date="2013-09-29" time="13:36:19-0500" node="goemon.lunari.net" tty=pts1 ppid=2437 pid=8208 exe="/usr/bin/vi" name="/etc/hosts~" user=root auid_user=mkirby cwd="/var/log"
+Here is an example of /etc/hosts being modified.  Error code ESRCH means someone echo'd into the file.
+auditid="8688" auid="1000" auid_user="mkirby" cwd="/root" date="2017-02-02" errcode="ESRCH" errdesc="No such process" euid="0" euid_user="root" exe="/usr/bin/bash" exit="3" key="FILE" name="/etc/hosts" node="goemon.mkirby.org" pid="5884" ppid="5883" proctitle="-bash" ses="4" subj="unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023" time="02:12:14+0000" tty="pts2" types="SYSCALL,CWD,PATH,PROCTITLE,EOE" uid="0" uid_user="root"
 
-    
 Here is a connect syscall example of an egress connection to mkirby.org:
-type=SOCKADDR key=CONNECT auditid=143682 date="2013-09-29" time="13:38:49-0500" node="goemon.lunari.net" tty=pts1 ppid=2437 pid=8229 auid_user=mkirby user=root saddr="184.82.178.105 port 443" exe="/usr/bin/telnet"
-    
-Here is a bind syscall example of httpd binding to port 443:
-type=SOCKADDR key=BIND auditid=143745 date="2013-09-29" time="13:39:31-0500" node="goemon.lunari.net" tty=(none) ppid=1 pid=8252 auid=4294967295 user=root saddr="0.0.0.0 port 443" exe="/usr/sbin/httpd"
-    
-    
-    
-    
+auditid="9845" auid="1000" auid_user="mkirby" date="2017-02-02" euid="0" euid_user="root" exe="/usr/bin/telnet" exit="0" key="CONNECT" node="goemon.mkirby.org" pid="14649" port="80" ppid="5884" proctitle="telnet localhost 80" saddr="127.0.0.1" ses="4" subj="unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023" time="02:14:29+0000" tty="pts2" types="SYSCALL,SOCKADDR,PROCTITLE,EOE" uid="0" uid_user="root"
+
+Here is a bind syscall example of httpd binding to port 80.
+auditid="1165" auid="4294967295" date="2017-02-01" euid="0" euid_user="root" exe="/usr/sbin/httpd" exit="0" key="BIND" node="goemon.mkirby.org" pid="3037" port="80" ppid="1" proctitle="(httpd)" saddr=":::::::" ses="4294967295" time="16:47:49+0000" tty="(none)" type="EOE" uid="0" uid_user="root"
+
+
+
+
 INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
 
 1) Place this script file in /bin/ and chmod this file to 750
@@ -663,28 +436,23 @@ INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
     -c
     #
     # Add any other dirs you want monitored for file writes
-    # These can be noisy during patching.  Enable at your own risk
-    #-w /etc/ -p w -k FILE
-    #-w /root/ -p w -k FILE
-    #-w /var/spool/at/ -p w -k FILE
-    #-w /var/spool/cron/ -p w -k FILE
-    #-w /usr/lib/ -p w -k FILE
-    #-w /usr/lib64/ -p w -k FILE
-    #-w /usr/libexec/ -p w -k FILE
-    #-w /usr/bin/ -p w -k FILE
-    #-w /usr/sbin/ -p w -k FILE
-    #-w /usr/local/ -p w -k FILE
+    # These can be noisy during patching. 
+    -w /etc/ -p w -k FILE
+    -w /root/.ssh/ -p w -k FILE
+    -w /var/spool/at/ -p w -k FILE
+    -w /var/spool/cron/ -p w -k FILE
+    #-w /usr -p w -k FILE
     #-w /boot/ -p w -k FILE
     #
-    # Monitor commands
-    -a exit,always -F arch=b32 -S execve -k EXECVE
-    -a exit,always -F arch=b64 -S execve -k EXECVE
+    # Monitor commands.  I add "-F uid!=setroubleshoot" to mine to avoid selinux junk.
+    -a exit,always -F arch=b32 -F exit=0 -S execve -k EXECVE
+    -a exit,always -F arch=b64 -F exit=0 -S execve -k EXECVE
     #
     # Monitor network connections.
     # These are VERY noisy.  Enable at your own risk
-    #-a exit,always -F arch=b32 -S socketcall -k SOCKETCALL -F exit!=-2
-    #-a exit,always -F arch=b64 -S bind -k BIND -F exit!=-2
-    #-a exit,always -F arch=b64 -S connect -k CONNECT -F exit!=-2
+    #-a exit,always -F arch=b32 -F exit=0 -S socketcall -k SOCKETCALL
+    #-a exit,always -F arch=b64 -F exit=0 -S bind -k BIND
+    #-a exit,always -F arch=b64 -F exit=0 -S connect -k CONNECT
     #
     # activate auditing
     -e 1
@@ -717,15 +485,13 @@ INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
         saddr=public
         saddr=private
         saddr=/dev/log
-        saddr=.*port 53
-        saddr=.*:53
-        saddr=::::::: port
-        name=.*swx"$
-        name=.*swp"$
-        name=.*swpx"$
-        exe="/var/ossec/bin/ossec-syscheckd"
-        exe="/opt/splunk/bin/splunkd"
-        exe="/opt/splunkforwarder/bin/splunkd"
+        saddr=:::::::
+        name=.*swx$
+        name=.*swp$
+        name=.*swpx$
+        exe=/var/ossec/bin/ossec-syscheckd
+        exe=/opt/splunk/bin/splunkd
+        exe=/opt/splunkforwarder/bin/splunkd
         
 9) Restart the auditd service
 
@@ -760,6 +526,7 @@ If you are running SELinux, you may want to add the following to your local poli
         type auditd_t;
         type auditd_etc_t;
         type auditd_log_t;
+        type urandom_device_t;
         type var_log_t;
     }  
     allow audisp_t var_log_t:file { create open read write execute execute_no_trans getattr };
@@ -768,6 +535,8 @@ If you are running SELinux, you may want to add the following to your local poli
     allow audisp_t auditd_etc_t:file { read open getattr };
     allow audisp_t auditd_log_t:dir { read search open };
     allow audisp_t auditd_log_t:file { read open getattr };
+    allow audisp_t urandom_device_t:chr_file { read open getattr };
+
 
 2) and then run
     cd /etc/selinux/targeted/modules/active/src/

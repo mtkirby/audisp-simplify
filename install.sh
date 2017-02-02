@@ -80,27 +80,22 @@ cat >/tmp/audit.rules <<EOF
 #
 # Add any other dirs you want monitored for file writes
 # These can be noisy during patching.  Enable at your own risk
-#-w /etc/ -p w -k FILE
-#-w /root/ -p w -k FILE
-#-w /var/spool/at/ -p w -k FILE
-#-w /var/spool/cron/ -p w -k FILE
-#-w /usr/lib/ -p w -k FILE
-#-w /usr/lib64/ -p w -k FILE
-#-w /usr/libexec/ -p w -k FILE
-#-w /usr/bin/ -p w -k FILE
-#-w /usr/sbin/ -p w -k FILE
-#-w /usr/local/ -p w -k FILE
+-w /etc/ -p w -k FILE
+-w /root/.ssh/ -p w -k FILE
+-w /var/spool/at/ -p w -k FILE
+-w /var/spool/cron/ -p w -k FILE
+#-w /usr/ -p w -k FILE
 #-w /boot/ -p w -k FILE
 #
 # Monitor commands
--a exit,always -F arch=b32 -S execve -k EXECVE
--a exit,always -F arch=b64 -S execve -k EXECVE
+-a exit,always -F arch=b32 -F exit=0 -S execve -k EXECVE
+-a exit,always -F arch=b64 -F exit=0 -S execve -k EXECVE
 #
 # Monitor network connections.
 # These are VERY noisy.  Enable at your own risk
-#-a exit,always -F arch=b32 -S socketcall -k SOCKETCALL -F exit!=-2
-#-a exit,always -F arch=b64 -S bind -k BIND -F exit!=-2
-#-a exit,always -F arch=b64 -S connect -k CONNECT -F exit!=-2
+#-a exit,always -F arch=b32 -F exit=0 -S socketcall -k SOCKETCALL
+#-a exit,always -F arch=b64 -F exit=0 -S bind -k BIND
+#-a exit,always -F arch=b64 -F exit=0 -S connect -k CONNECT
 #
 # activate auditing
 -e 1
@@ -144,15 +139,13 @@ saddr=netlink.*
 saddr=public
 saddr=private
 saddr=/dev/log
-saddr=.*port 53
-saddr=.*:53
-saddr=::::::: port
-name=.*swx"$
-name=.*swp"$
-name=.*swpx"$
-exe="/var/ossec/bin/ossec-syscheckd"
-exe="/opt/splunk/bin/splunkd"
-exe="/opt/splunkforwarder/bin/splunkd"
+saddr=:::::::
+name=.*swx$
+name=.*swp$
+name=.*swpx$
+exe=/var/ossec/bin/ossec-syscheckd
+exe=/opt/splunk/bin/splunkd
+exe=/opt/splunkforwarder/bin/splunkd
 EOF
 echo ""
 echo "##################################################"
@@ -177,13 +170,14 @@ If you do not have a local policy, you will need to create one.
 2) Add these lines to /etc/selinux/targeted/modules/active/src/local.te
 module local 1.0;
 require {
-    class dir { open getattr search write read remove_name add_name };
-    class file { create open read write execute execute_no_trans getattr };
-    type audisp_t;
-    type auditd_t;
-    type auditd_etc_t;
-    type auditd_log_t;
-    type var_log_t;
+	class dir { open getattr search write read remove_name add_name };
+	class file { create open read write execute execute_no_trans getattr };
+	type audisp_t;
+	type auditd_t;
+	type auditd_etc_t;
+	type auditd_log_t;
+	type urandom_device_t;
+	type var_log_t;
 }  
 allow audisp_t var_log_t:file { create open read write execute execute_no_trans getattr };
 allow audisp_t var_log_t:dir { write add_name };
@@ -191,7 +185,7 @@ allow audisp_t auditd_etc_t:dir { read search open };
 allow audisp_t auditd_etc_t:file { read open getattr };
 allow audisp_t auditd_log_t:dir { read search open };
 allow audisp_t auditd_log_t:file { read open getattr };
-
+allow audisp_t urandom_device_t:chr_file { read open getattr };
 
 3) Then run
     cd /etc/selinux/targeted/modules/active/src/
