@@ -266,7 +266,7 @@ sub Main {
 
             # audits do not arrive in order.
             # wait a few seconds before logging.
-            $time = localtime(time);
+            $time = time;
             next AUDITID if ( $time < $sh{$auditid}{autime} + 3 );
 
             # don't log myself
