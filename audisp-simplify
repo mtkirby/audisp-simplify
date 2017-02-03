@@ -68,7 +68,7 @@ sub Main {
     my $ignorestring;
     my $item;
     my $log;
-    my $logfile = '/var/log/audisp-simplify.fifo';
+    my $logfile = '/var/log/audisp-simplify';
     my %sh;
     my $subkey;
     my $time;
