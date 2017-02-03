@@ -15,6 +15,7 @@
 # 20170130 Kirby  v1.0.12
 # 20170131 Kirby  v2.0
 # 20170201 Kirby  v2.0.1 
+# 20170202 Kirby  v2.0.2
 ################################################################################
 
 # LICENSE
@@ -52,6 +53,7 @@ sub Main {
     my $argc;
     my $args;
     my $auditid;
+    my $autime;
     my $cmd;
     my @command;
     my @cleancmd;
@@ -66,7 +68,7 @@ sub Main {
     my $ignorestring;
     my $item;
     my $log;
-    my $logfile = '/var/log/audisp-simplify';
+    my $logfile = '/var/log/audisp-simplify.fifo';
     my %sh;
     my $subkey;
     my $time;
@@ -98,25 +100,25 @@ sub Main {
     while (<STDIN>) {
         chomp;
         $event = $_;
-        if ( $event =~ m|^node=(\S+) type=\S+ msg=audit\(\d+\.\d+:(\d+)\): | ) {
-            $auditid                  = $2;
+        if ( $event =~ m|^node=(\S+) type=\S+ msg=audit\((\d+)\.\d+:(\d+)\): | ) {
+            $auditid                  = $3;
+            $sh{$auditid}{autime}     = $2;
             $sh{$auditid}{node}       = $1;
             $sh{$auditid}{auditid}    = $auditid;
-            $sh{$auditid}{pid}        = $1 if ( $event =~ m| pid=(\d+)| );
-            $sh{$auditid}{ppid}       = $1 if ( $event =~ m| ppid=(\d+)| );
-            $sh{$auditid}{epoch}      = time;
-            $sh{$auditid}{date}       = strftime "%Y-%m-%d", localtime(time);
-            $sh{$auditid}{time}       = strftime "%H:%M:%S%z", localtime(time);
-            $sh{$auditid}{res}        = $1 if ( $event =~ m| res=(\w+)| );
-            $sh{$auditid}{ses}        = $1 if ( $event =~ m| ses=(\d+)| );
-            $sh{$auditid}{terminal}   = $1 if ( $event =~ m| terminal=(\S+)| );
-            $sh{$auditid}{tty}        = $1 if ( $event =~ m| tty=(\S+)| );
+            $sh{$auditid}{date}       = strftime "%Y-%m-%d", localtime($sh{$auditid}{autime});
+            $sh{$auditid}{time}       = strftime "%H:%M:%S%z", localtime($sh{$auditid}{autime});
             $sh{$auditid}{exit}       = $1 if ( $event =~ m| exit=(-?\d+)| );
             $sh{$auditid}{key}        = $1 if ( $event =~ m| key="([^"]+)"| );
-            $sh{$auditid}{seresult}   = $1 if ( $event =~ m| seresult=(\w+)| );
-            $sh{$auditid}{oldcontext} = $1 if ( $event =~ m| oldcontext=(\S+)| );
             $sh{$auditid}{newcontext} = $1 if ( $event =~ m| newcontext=(\S+)| );
+            $sh{$auditid}{oldcontext} = $1 if ( $event =~ m| oldcontext=(\S+)| );
+            $sh{$auditid}{pid}        = $1 if ( $event =~ m| pid=(\d+)| );
+            $sh{$auditid}{ppid}       = $1 if ( $event =~ m| ppid=(\d+)| );
+            $sh{$auditid}{res}        = $1 if ( $event =~ m| res=(\w+)| );
+            $sh{$auditid}{seresult}   = $1 if ( $event =~ m| seresult=(\w+)| );
+            $sh{$auditid}{ses}        = $1 if ( $event =~ m| ses=(\d+)| );
             $sh{$auditid}{subj}       = $1 if ( $event =~ m| subj=(\S+)| );
+            $sh{$auditid}{terminal}   = $1 if ( $event =~ m| terminal=(\S+)| );
+            $sh{$auditid}{tty}        = $1 if ( $event =~ m| tty=(\S+)| );
 
             if ( $event =~ m| uid=(\d+)| ) {
                 $sh{$auditid}{uid} = $1;
@@ -222,35 +224,32 @@ sub Main {
                 $argc = $1;
                 $args = $1 if ( $event =~ m| argc=\d+( .*)| );
                 if ( $argc > ( defined $sh{$auditid}{argc} ? $sh{$auditid}{argc} : 0 ) ) {
-
                     # Sometimes there are more than 1 EXECVE lines with missing args.
                     # Choose the highest argc.
                     $sh{$auditid}{argc} = $argc;
-                } else {
-                    next INPUT;
-                }
-                @command = split( /\s+a\d+=/, $args );
-                @cleancmd = '';
-                foreach $cmd (@command) {
-                    if ( $cmd =~ m|^([A-F0-9]+)$| ) {
-                        $cmd = pack( "H*", "$1" );
+                    @command = split( /\s+a\d+=/, $args );
+                    @cleancmd = '';
+                    foreach $cmd (@command) {
+                        if ( $cmd =~ m|^([A-F0-9]+)$| ) {
+                            $cmd = pack( "H*", "$1" );
+                        }
+                        $cmd =~ s/(^"|"$|^\s+|\s+$)//g;
+                        push( @cleancmd, $cmd );
                     }
-                    $cmd =~ s/(^"|"$|^\s+|\s+$)//g;
-                    push( @cleancmd, $cmd );
+                    $sh{$auditid}{command} = join( ' ', @cleancmd );
+                    $sh{$auditid}{command} =~ s/(^\s+|\s+$)//g;
+                    $sh{$auditid}{command} =~ s|\n| |g;
+                    $sh{$auditid}{command} =~ s|\s+| |g;
                 }
-
-                $sh{$auditid}{command} = join( ' ', @cleancmd );
-                $sh{$auditid}{command} =~ s/(^\s+|\s+$)//g;
-                $sh{$auditid}{command} =~ s|\n| |g;
-                $sh{$auditid}{command} =~ s|\s+| |g;
             }
 
-            # Sometimes there are more than 1 PATH lines.
-            # Choose the highest item.
+            # Sometimes there are more than 1 type=PATH lines.
+            # Choose the lowest item.
             if ( $event =~ m| item=(\d+)| ) {
                 $item = $1;
-                if ( ( $item > ( defined $sh{$auditid}{item} ? $sh{$auditid}{item} : -1 ) )
+                if ( ( $item < ( defined $sh{$auditid}{item} ? $sh{$auditid}{item} : 100 ) )
                 and ( $event !~ m| name='?\(null\)'?| ) ) {
+                    $sh{$auditid}{item} = $item;
                     if ( $event =~ m| name="([^"]+)"| ) {
                         $sh{$auditid}{name} = $1;
                     } elsif ( $event =~ m| name=([A-F0-9]+)| ) {
@@ -259,8 +258,6 @@ sub Main {
                         $sh{$auditid}{name} = $1;
                     }
                 }
-            } else {
-                next INPUT;
             }
         }
 
@@ -269,8 +266,8 @@ sub Main {
 
             # audits do not arrive in order.
             # wait a few seconds before logging.
-            $time = time;
-            next AUDITID if ( $time < $sh{$auditid}{epoch} + 3 );
+            $time = localtime(time);
+            next AUDITID if ( $time < $sh{$auditid}{autime} + 3 );
 
             # don't log myself
             if ( ( $sh{$auditid}{pid} == $$ ) or ( $sh{$auditid}{ppid} == $$ ) ) {
@@ -296,7 +293,7 @@ sub Main {
             $log = '';
             foreach $subkey ( sort ( keys %{ $sh{$auditid} } ) ) {
                 next if ( $subkey eq "argc" );
-                next if ( $subkey eq "epoch" );
+                next if ( $subkey eq "autime" );
                 next if ( $subkey eq "item" );
                 $sh{$auditid}{$subkey} =~ s|"||g;
                 $log .= qq($subkey="$sh{$auditid}{$subkey}" );
@@ -312,7 +309,6 @@ sub Main {
     }
 
     return 0;
-
 }
 
 #################################################################################
