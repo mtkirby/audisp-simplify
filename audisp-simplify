@@ -14,8 +14,9 @@
 # 20170130 Kirby  v1.0.11
 # 20170130 Kirby  v1.0.12
 # 20170131 Kirby  v2.0
-# 20170201 Kirby  v2.0.1 
+# 20170201 Kirby  v2.0.1
 # 20170202 Kirby  v2.0.2
+# 20170204 Kirby  v2.0.3
 ################################################################################
 
 # LICENSE
@@ -76,13 +77,13 @@ sub Main {
     #
     # Cache all the error codes rather than calling Errno on each event.
     #
-    foreach $err (keys (%!)) {
+    foreach $err ( keys(%!) ) {
         $!               = eval "Errno::$err";
         $errno           = $! + 0;
         $errcode{$errno} = $err;
         $errdesc{$err}   = "$!";
     }
-    
+
     if ( -f "$ignorefile" ) {
         open( IG, '<', "$ignorefile" );
         while (<IG>) {
@@ -100,14 +101,16 @@ sub Main {
     while (<STDIN>) {
         chomp;
         $event = $_;
-        if ( $event =~ m|^node=(\S+) type=\S+ msg=audit\((\d+)\.\d+:(\d+)\): | ) {
-            $auditid                  = $3;
-            $sh{$auditid}{autime}     = $2;
-            $sh{$auditid}{node}       = $1;
-            $sh{$auditid}{auditid}    = $auditid;
-            $sh{$auditid}{date}       = strftime "%Y-%m-%d", localtime($sh{$auditid}{autime});
-            $sh{$auditid}{time}       = strftime "%H:%M:%S%z", localtime($sh{$auditid}{autime});
+        if ( $event =~ m|^node=(\S+) .* msg=audit\((\d+)\.\d+:(\d+)\): | ) {
+            $auditid               = $3;
+            $sh{$auditid}{autime}  = $2;
+            $sh{$auditid}{node}    = $1;
+            $sh{$auditid}{auditid} = $auditid;
+            $sh{$auditid}{date} = strftime "%Y-%m-%d",   localtime( $sh{$auditid}{autime} );
+            $sh{$auditid}{time} = strftime "%H:%M:%S%z", localtime( $sh{$auditid}{autime} );
+            $sh{$auditid}{addr}       = $1 if ( $event =~ m| addr=(\S+)| );
             $sh{$auditid}{exit}       = $1 if ( $event =~ m| exit=(-?\d+)| );
+            $sh{$auditid}{hostname}   = $1 if ( $event =~ m| hostname=(\S+)| );
             $sh{$auditid}{key}        = $1 if ( $event =~ m| key="([^"]+)"| );
             $sh{$auditid}{newcontext} = $1 if ( $event =~ m| newcontext=(\S+)| );
             $sh{$auditid}{oldcontext} = $1 if ( $event =~ m| oldcontext=(\S+)| );
@@ -213,7 +216,7 @@ sub Main {
             if ( $event =~ m| exit=-?(\d+)| ) {
                 if ( defined $errcode{$1} ) {
                     $sh{$auditid}{errcode} = $errcode{$1};
-                    $sh{$auditid}{errdesc} = $errdesc{$sh{$auditid}{errcode}};
+                    $sh{$auditid}{errdesc} = $errdesc{ $sh{$auditid}{errcode} };
                 }
             }
             if ( $event =~ m| saddr=([A-F0-9]+)| ) {
@@ -224,6 +227,7 @@ sub Main {
                 $argc = $1;
                 $args = $1 if ( $event =~ m| argc=\d+( .*)| );
                 if ( $argc > ( defined $sh{$auditid}{argc} ? $sh{$auditid}{argc} : 0 ) ) {
+
                     # Sometimes there are more than 1 EXECVE lines with missing args.
                     # Choose the highest argc.
                     $sh{$auditid}{argc} = $argc;
@@ -244,11 +248,12 @@ sub Main {
             }
 
             # Sometimes there are more than 1 type=PATH lines.
-            # Choose the lowest item.
+            # Choose the lowest item.  Subsequent items only show linked libraries.
             if ( $event =~ m| item=(\d+)| ) {
                 $item = $1;
-                if ( ( $item < ( defined $sh{$auditid}{item} ? $sh{$auditid}{item} : 100 ) )
-                and ( $event !~ m| name='?\(null\)'?| ) ) {
+                if (    ( $item < ( defined $sh{$auditid}{item} ? $sh{$auditid}{item} : 100 ) )
+                    and ( $event !~ m| name='?\(null\)'?| ) )
+                {
                     $sh{$auditid}{item} = $item;
                     if ( $event =~ m| name="([^"]+)"| ) {
                         $sh{$auditid}{name} = $1;
@@ -275,12 +280,6 @@ sub Main {
                 next AUDITID;
             }
 
-            # Uncomment to only log entries with a user-defined key
-            # unless ( defined $sh{$auditid}{key} ) {
-            #     delete $sh{$auditid};
-            #     next AUDITID;
-            # }
-
             foreach $ignorekey ( keys %ignores ) {
                 foreach $ignorestring ( @{ $ignores{$ignorekey} } ) {
                     if ( $sh{$auditid}{$ignorekey} =~ m|$ignorestring| ) {
@@ -295,6 +294,7 @@ sub Main {
                 next if ( $subkey eq "argc" );
                 next if ( $subkey eq "autime" );
                 next if ( $subkey eq "item" );
+                next if ( $sh{$auditid}{$subkey} =~ m|^\??$|g );
                 $sh{$auditid}{$subkey} =~ s|"||g;
                 $log .= qq($subkey="$sh{$auditid}{$subkey}" );
             }
