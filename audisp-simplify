@@ -17,6 +17,7 @@
 # 20170201 Kirby  v2.0.1
 # 20170202 Kirby  v2.0.2
 # 20170204 Kirby  v2.0.3
+# 20170206 Kirby  v2.0.4
 ################################################################################
 
 # LICENSE
@@ -46,6 +47,7 @@ umask 0077;
 
 # https://raw.githubusercontent.com/linux-audit/audit-documentation/master/specs/fields/field-dictionary.csv
 # https://access.redhat.com/documentation/en-US/Red_Hat_Enterprise_Linux/6/html/Security_Guide/app-Audit_Reference.html#sec-Audit_Events_Fields
+# https://fedorahosted.org/audit/browser/trunk/rules/30-pci-dss-v31.rules
 
 &Main;
 
@@ -54,7 +56,6 @@ sub Main {
     my $argc;
     my $args;
     my $auditid;
-    my $autime;
     my $cmd;
     my @command;
     my @cleancmd;
@@ -103,11 +104,11 @@ sub Main {
         $event = $_;
         if ( $event =~ m|^node=(\S+) .* msg=audit\((\d+)\.\d+:(\d+)\): | ) {
             $auditid               = $3;
-            $sh{$auditid}{autime}  = $2;
             $sh{$auditid}{node}    = $1;
             $sh{$auditid}{auditid} = $auditid;
-            $sh{$auditid}{date} = strftime "%Y-%m-%d",   localtime( $sh{$auditid}{autime} );
-            $sh{$auditid}{time} = strftime "%H:%M:%S%z", localtime( $sh{$auditid}{autime} );
+            $sh{$auditid}{date} = strftime "%Y-%m-%d",   localtime( $2 );
+            $sh{$auditid}{time} = strftime "%H:%M:%S%z", localtime( $2 );
+            $sh{$auditid}{autime}     = time;
             $sh{$auditid}{addr}       = $1 if ( $event =~ m| addr=(\S+)| );
             $sh{$auditid}{exit}       = $1 if ( $event =~ m| exit=(-?\d+)| );
             $sh{$auditid}{hostname}   = $1 if ( $event =~ m| hostname=(\S+)| );
@@ -119,9 +120,19 @@ sub Main {
             $sh{$auditid}{res}        = $1 if ( $event =~ m| res=(\w+)| );
             $sh{$auditid}{seresult}   = $1 if ( $event =~ m| seresult=(\w+)| );
             $sh{$auditid}{ses}        = $1 if ( $event =~ m| ses=(\d+)| );
+            $sh{$auditid}{ses}        = 'unset' if ( $event =~ m| ses=4294967295| );
             $sh{$auditid}{subj}       = $1 if ( $event =~ m| subj=(\S+)| );
             $sh{$auditid}{terminal}   = $1 if ( $event =~ m| terminal=(\S+)| );
             $sh{$auditid}{tty}        = $1 if ( $event =~ m| tty=(\S+)| );
+            $sh{$auditid}{direction}  = $1 if ( $event =~ m| direction=(\S+)| );
+            $sh{$auditid}{cipher}     = $1 if ( $event =~ m| cipher=(\S+)| );
+            $sh{$auditid}{ksize}      = $1 if ( $event =~ m| ksize=(\d+)| );
+            $sh{$auditid}{mac}        = $1 if ( $event =~ m| mac=(\S+)| );
+            $sh{$auditid}{pfs}        = $1 if ( $event =~ m| pfs=(\S+)| );
+            $sh{$auditid}{spid}       = $1 if ( $event =~ m| spid=(\d+)| );
+            $sh{$auditid}{suid}       = $1 if ( $event =~ m| suid=(\d+)| );
+            $sh{$auditid}{laddr}      = $1 if ( $event =~ m| laddr=(\S+)| );
+            $sh{$auditid}{lport}      = $1 if ( $event =~ m| lport=(\d+)| );
 
             if ( $event =~ m| uid=(\d+)| ) {
                 $sh{$auditid}{uid} = $1;
@@ -204,13 +215,11 @@ sub Main {
 
             if ( $event =~ m| proctitle="([^"]+)"| ) {
                 $sh{$auditid}{proctitle} = $1;
-                $sh{$auditid}{proctitle} =~ tr/a-zA-Z0-9\-_\[\]\{\}\.,\<\>\?\/ \!\@\#\$\%\^\&\*\(\);:/ /dc;
             } elsif ( $event =~ m| proctitle=([A-F0-9]+)| ) {
                 $sh{$auditid}{proctitle} = pack( "H*", "$1" );
                 $sh{$auditid}{proctitle} =~ tr/a-zA-Z0-9\-_\[\]\{\}\.,\<\>\?\/ \!\@\#\$\%\^\&\*\(\);:/ /dc;
             } elsif ( $event =~ m| proctitle=(\S+)| ) {
                 $sh{$auditid}{proctitle} = $1;
-                $sh{$auditid}{proctitle} =~ tr/a-zA-Z0-9\-_\[\]\{\}\.,\<\>\?\/ \!\@\#\$\%\^\&\*\(\);:/ /dc;
             }
 
             if ( $event =~ m| exit=-?(\d+)| ) {
@@ -272,7 +281,7 @@ sub Main {
             # audits do not arrive in order.
             # wait a few seconds before logging.
             $time = time;
-            next AUDITID if ( $time < $sh{$auditid}{autime} + 3 );
+            next AUDITID if ( $time < $sh{$auditid}{autime} + 5 );
 
             # don't log myself
             if ( ( $sh{$auditid}{pid} == $$ ) or ( $sh{$auditid}{ppid} == $$ ) ) {
@@ -433,12 +442,15 @@ INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
     #
     # Add any other dirs you want monitored for file writes
     # These can be noisy during patching. 
-    -w /etc/ -p w -k FILE
-    -w /root/.ssh/ -p w -k FILE
-    -w /var/spool/at/ -p w -k FILE
-    -w /var/spool/cron/ -p w -k FILE
-    #-w /usr -p w -k FILE
-    #-w /boot/ -p w -k FILE
+    -w /etc/                 -p w  -k FILE-etc
+    -w /var/spool/cron/      -p w  -k FILE-cron
+    -w /var/www/             -p w  -k FILE-www
+    -w /var/named/chroot/    -p w  -k FILE-named
+    -w /boot/                -p w  -k FILE-boot
+    -w /root/.ssh/           -p rw -k FILE-ssh
+    -w /etc/pki/tls/private/ -p r  -k FILE-pki
+    -w /etc/pki/tls/certs/   -p r  -k FILE-pki
+    #-w /usr/                 -p w  -k FILE-usr
     #
     # Monitor commands.  I add "-F uid!=setroubleshoot" to mine to avoid selinux junk.
     -a exit,always -F arch=b32 -F exit=0 -S execve -k EXECVE
@@ -450,6 +462,43 @@ INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
     #-a exit,always -F arch=b64 -F exit=0 -S bind -k BIND
     #-a exit,always -F arch=b64 -F exit=0 -S connect -k CONNECT
     #
+    ## This rule suppresses the time-change event when chrony does time updates
+    -a never,exit -F arch=b64 -S adjtimex -F auid=unset -Fuid=chrony
+    -a never,exit -F arch=b32 -S adjtimex -F auid=unset -Fuid=chrony
+    -a never,exit -F arch=b64 -S adjtimex -F auid=unset -Fuid=ntp
+    -a never,exit -F arch=b32 -S adjtimex -F auid=unset -Fuid=ntp
+
+
+    #Record Attempts to Alter Logon and Logout Events
+    -w /var/log/faillog -p w -k LOGINS-log
+    -w /var/log/lastlog -p w -k LOGINS-log
+
+    #Record Attempts to Alter Process and Session Initiation Information
+    -w /var/run/utmp -p w -k SESSION-log
+    -w /var/log/btmp -p w -k SESSION-log
+    -w /var/log/wtmp -p w -k SESSION-log
+
+    #Ensure auditd Collects Information on Kernel Module Loading and Unloading
+    -w /sbin/insmod -p x -k MODULES
+    -w /sbin/rmmod -p x -k MODULES
+    -w /sbin/modprobe -p x -k MODULES
+    -a always,exit -F arch=b32 -S init_module,finit_module -k MODULES
+    -a always,exit -F arch=b64 -S init_module,finit_module -k MODULES
+    -a always,exit -F arch=b32 -S delete_module -k MODULES
+    -a always,exit -F arch=b64 -S delete_module -k MODULES
+
+    ## These rules watch for code injection by the ptrace facility.
+    ## This could indicate someone trying to do something bad or
+    ## just debugging
+    -a always,exit -F arch=b32 -S ptrace -k PTRACE-tracing
+    -a always,exit -F arch=b64 -S ptrace -k PTRACE-tracing
+    -a always,exit -F arch=b32 -S ptrace -F a0=0x4 -k PTRACE-code-injection
+    -a always,exit -F arch=b64 -S ptrace -F a0=0x4 -k PTRACE-code-injection
+    -a always,exit -F arch=b32 -S ptrace -F a0=0x5 -k PTRACE-data-injection
+    -a always,exit -F arch=b64 -S ptrace -F a0=0x5 -k PTRACE-data-injection
+    -a always,exit -F arch=b32 -S ptrace -F a0=0x6 -k PTRACE-register-injection
+    -a always,exit -F arch=b64 -S ptrace -F a0=0x6 -k PTRACE-register-injection
+
     # activate auditing
     -e 1
 

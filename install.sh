@@ -80,12 +80,16 @@ cat >/tmp/audit.rules <<EOF
 #
 # Add any other dirs you want monitored for file writes
 # These can be noisy during patching.  Enable at your own risk
--w /etc/ -p w -k FILE
--w /root/.ssh/ -p w -k FILE
--w /var/spool/at/ -p w -k FILE
--w /var/spool/cron/ -p w -k FILE
-#-w /usr/ -p w -k FILE
-#-w /boot/ -p w -k FILE
+-w /etc/                 -p w  -k FILE-etc
+-w /var/spool/cron/      -p w  -k FILE-cron
+-w /var/www/             -p w  -k FILE-www
+-w /var/named/chroot/    -p w  -k FILE-named
+-w /boot/                -p w  -k FILE-boot
+-w /root/.ssh/           -p rw -k FILE-ssh
+-w /etc/pki/tls/private/ -p r  -k FILE-pki
+-w /etc/pki/tls/certs/   -p r  -k FILE-pki
+#-w /usr/                 -p w  -k FILE-usr
+#
 #
 # Monitor commands
 -a exit,always -F arch=b32 -F exit=0 -S execve -k EXECVE
@@ -96,6 +100,44 @@ cat >/tmp/audit.rules <<EOF
 #-a exit,always -F arch=b32 -F exit=0 -S socketcall -k SOCKETCALL
 #-a exit,always -F arch=b64 -F exit=0 -S bind -k BIND
 #-a exit,always -F arch=b64 -F exit=0 -S connect -k CONNECT
+#
+#
+## This rule suppresses the time-change event when chrony does time updates
+-a never,exit -F arch=b64 -S adjtimex -F auid=unset -Fuid=chrony
+-a never,exit -F arch=b32 -S adjtimex -F auid=unset -Fuid=chrony
+-a never,exit -F arch=b64 -S adjtimex -F auid=unset -Fuid=ntp
+-a never,exit -F arch=b32 -S adjtimex -F auid=unset -Fuid=ntp
+#
+#Record Attempts to Alter Logon and Logout Events
+-w /var/log/faillog -p w -k LOGINS-log
+-w /var/log/lastlog -p w -k LOGINS-log
+#
+#Record Attempts to Alter Process and Session Initiation Information
+-w /var/run/utmp -p w -k SESSION-log
+-w /var/log/btmp -p w -k SESSION-log
+-w /var/log/wtmp -p w -k SESSION-log
+#
+#Ensure auditd Collects Information on Kernel Module Loading and Unloading
+-w /sbin/insmod -p x -k MODULES
+-w /sbin/rmmod -p x -k MODULES
+-w /sbin/modprobe -p x -k MODULES
+-a always,exit -F arch=b32 -S init_module,finit_module -k MODULES
+-a always,exit -F arch=b64 -S init_module,finit_module -k MODULES
+-a always,exit -F arch=b32 -S delete_module -k MODULES
+-a always,exit -F arch=b64 -S delete_module -k MODULES
+#
+## These rules watch for code injection by the ptrace facility.
+## This could indicate someone trying to do something bad or
+## just debugging
+#-a always,exit -F arch=b32 -S ptrace -k PTRACE-tracing
+#-a always,exit -F arch=b64 -S ptrace -k PTRACE-tracing
+#-a always,exit -F arch=b32 -S ptrace -F a0=0x4 -k PTRACE-code-injection
+#-a always,exit -F arch=b64 -S ptrace -F a0=0x4 -k PTRACE-code-injection
+#-a always,exit -F arch=b32 -S ptrace -F a0=0x5 -k PTRACE-data-injection
+#-a always,exit -F arch=b64 -S ptrace -F a0=0x5 -k PTRACE-data-injection
+#-a always,exit -F arch=b32 -S ptrace -F a0=0x6 -k PTRACE-register-injection
+#-a always,exit -F arch=b64 -S ptrace -F a0=0x6 -k PTRACE-register-injection
+#
 #
 # activate auditing
 -e 1
