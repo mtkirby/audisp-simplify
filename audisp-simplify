@@ -18,6 +18,7 @@
 # 20170202 Kirby  v2.0.2
 # 20170204 Kirby  v2.0.3
 # 20170206 Kirby  v2.0.4
+# 20170216 Kirby  v2.0.5
 ################################################################################
 
 # LICENSE
@@ -53,6 +54,7 @@ umask 0077;
 
 #################################################################################
 sub Main {
+    my @alarms;
     my $argc;
     my $args;
     my $auditid;
@@ -71,6 +73,8 @@ sub Main {
     my $item;
     my $log;
     my $logfile = '/var/log/audisp-simplify';
+    my $name;
+    my $ouid_user;
     my %sh;
     my $subkey;
     my $time;
@@ -134,6 +138,12 @@ sub Main {
             $sh{$auditid}{laddr}      = $1 if ( $event =~ m| laddr=(\S+)| );
             $sh{$auditid}{lport}      = $1 if ( $event =~ m| lport=(\d+)| );
 
+
+            # avc:  denied  { execmem } for
+            if ( $event =~ m| avc:\s+(\w+\s+\{.+\}) for | ) {
+                $sh{$auditid}{avc} = $1;
+            }
+
             if ( $event =~ m| uid=(\d+)| ) {
                 $sh{$auditid}{uid} = $1;
                 $sh{$auditid}{uid_user} = getpwuid($1) || 'unset';
@@ -153,10 +163,35 @@ sub Main {
                 }
             }
 
+
             #
             # Some keys are unpredictable.
             # Some have values wrapped in quotes, some don't, and some are encoded
             #
+            if ( ( $event =~ m| name="([^"]+)" .* mode=(\d+) ouid=(\d+) | )
+            and ( $event !~ m| obj=system_u:object_r:ld_so_t:s0| ) ) {
+                $sh{$auditid}{names} = defined $sh{$auditid}{names} ? "$sh{$auditid}{names},$1" : $1;
+                $sh{$auditid}{mode}{$1} = $2;
+                $sh{$auditid}{ouid}{$1} = $3;
+            } elsif ( ( $event =~ m| name=([A-F0-9]+) .* mode=(\d+) ouid=(\d+) | )
+            and ( $event !~ m| obj=system_u:object_r:ld_so_t:s0| ) ) {
+                $name = pack( "H*", "$1" );
+                $sh{$auditid}{names} = defined $sh{$auditid}{names} ? "$sh{$auditid}{names},$name" : $name;
+                $sh{$auditid}{mode}{$name} = $2;
+                $sh{$auditid}{ouid}{$name} = $3;
+            } elsif ( ( $event =~ m| name=(\S+) .* mode=(\d+) ouid=(\d+) | ) 
+            and ( $event !~ m| obj=system_u:object_r:ld_so_t:s0| ) ) {
+                $sh{$auditid}{names} = defined $sh{$auditid}{names} ? "$sh{$auditid}{names},$1" : $1;
+                $sh{$auditid}{mode}{$1} = $2;
+                $sh{$auditid}{ouid}{$1} = $3;
+            }
+
+            if ( ( $event =~ m| nametype=(\S+)| ) 
+            and ( $event !~ m| obj=system_u:object_r:ld_so_t:s0| ) ) {
+                $sh{$auditid}{nametypes} = defined $sh{$auditid}{nametypes} ? "$sh{$auditid}{nametypes},$1" : $1;
+            }
+
+
             if ( $event =~ m| acct="([^"]+)"| ) {
                 $sh{$auditid}{acct} = $1;
             } elsif ( $event =~ m| acct=([A-F0-9]+)| ) {
@@ -256,23 +291,6 @@ sub Main {
                 }
             }
 
-            # Sometimes there are more than 1 type=PATH lines.
-            # Choose the lowest item.  Subsequent items only show linked libraries.
-            if ( $event =~ m| item=(\d+)| ) {
-                $item = $1;
-                if (    ( $item < ( defined $sh{$auditid}{item} ? $sh{$auditid}{item} : 100 ) )
-                    and ( $event !~ m| name='?\(null\)'?| ) )
-                {
-                    $sh{$auditid}{item} = $item;
-                    if ( $event =~ m| name="([^"]+)"| ) {
-                        $sh{$auditid}{name} = $1;
-                    } elsif ( $event =~ m| name=([A-F0-9]+)| ) {
-                        $sh{$auditid}{name} = pack( "H*", "$1" );
-                    } elsif ( $event =~ m| name=(\S+)| ) {
-                        $sh{$auditid}{name} = $1;
-                    }
-                }
-            }
         }
 
       AUDITID:
@@ -299,10 +317,31 @@ sub Main {
             }
 
             $log = '';
+            if ( $sh{$auditid}{types} =~ m|EXECVE| ) {
+                undef @alarms;
+                foreach $name ( keys %{ $sh{$auditid}{ouid} } ) {
+                    if ( ( $sh{$auditid}{uid} != $sh{$auditid}{ouid}{$name} )
+                    and ( $sh{$auditid}{ouid}{$name} != 0 ) ) {
+                        $ouid_user = getpwuid($sh{$auditid}{ouid}{$name}) || 'unset';
+                        push(@alarms, "$sh{$auditid}{uid}:$sh{$auditid}{uid_user} ran $name owned by $sh{$auditid}{ouid}{$name}:$ouid_user");
+                    }
+                }
+                foreach $name ( keys %{ $sh{$auditid}{mode} } ) {
+                    if ( ( $sh{$auditid}{mode}{$name} =~ m|[267]$| )
+                    and  ( $sh{$auditid}{mode}{$name} !~ m|01[24]0[67][67][67]| ) ) {
+                        push(@alarms, "$name is mode $sh{$auditid}{mode}{$name} world-writable");
+                    }
+                }
+                if ( @alarms ) {
+                    $sh{$auditid}{ALARMS} = join(', ', @alarms);
+                }
+            }
             foreach $subkey ( sort ( keys %{ $sh{$auditid} } ) ) {
                 next if ( $subkey eq "argc" );
                 next if ( $subkey eq "autime" );
                 next if ( $subkey eq "item" );
+                next if ( $subkey eq "mode" );
+                next if ( $subkey eq "ouid" );
                 next if ( $sh{$auditid}{$subkey} =~ m|^\??$|g );
                 $sh{$auditid}{$subkey} =~ s|"||g;
                 $log .= qq($subkey="$sh{$auditid}{$subkey}" );
