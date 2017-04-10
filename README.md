@@ -1,5 +1,5 @@
 # audisp-simplify
-
+```
 README
 This program is an audisp plugin that will make audit events from the Linux Audit daemon human readable.
 It will look for execve, socketcall, bind, and connect system calls as well as filesystem changes (if you setup audit rules) and consolidate the events into a simple log format.
@@ -46,11 +46,11 @@ INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
     # delete all existing rules
     -D
     # disable auditing during load
-    -e 0
+    -e 0    
     # fail silently
-    -f 0
+    -f 0    
     # 65k buffer
-    -b 65536
+    -b 65536    
     # no rate
     -r 0
     # continue loading if bad rule and report
@@ -205,3 +205,4 @@ If you are running SELinux, you may want to add the following to your local poli
     semodule_package -o local.pp -m local.mod
     semodule -i local.pp
 
+```
