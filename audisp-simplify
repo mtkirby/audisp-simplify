@@ -19,6 +19,8 @@
 # 20170204 Kirby  v2.0.3
 # 20170206 Kirby  v2.0.4
 # 20170216 Kirby  v2.0.5
+# 20170515 Kirby  v2.0.6
+# 20170522 Kirby  v2.0.7
 ################################################################################
 
 # LICENSE
@@ -106,12 +108,14 @@ sub Main {
     while (<STDIN>) {
         chomp;
         $event = $_;
-        if ( $event =~ m|^node=(\S+) .* msg=audit\((\d+)\.\d+:(\d+)\): | ) {
-            $auditid               = $3;
-            $sh{$auditid}{node}    = $1;
-            $sh{$auditid}{auditid} = $auditid;
-            $sh{$auditid}{date} = strftime "%Y-%m-%d",   localtime( $2 );
-            $sh{$auditid}{time} = strftime "%H:%M:%S%z", localtime( $2 );
+        if ( $event =~ m|^node=(\S+) .* msg=audit\((\d+)\.(\d+):(\d+)\): | ) {
+            $auditid                  = $4;
+            $sh{$auditid}{node}       = $1;
+            $sh{$auditid}{auditid}    = $auditid;
+            $sh{$auditid}{date}       = strftime "%Y-%m-%d", localtime( $2 );
+            $sh{$auditid}{time}       = strftime "%H:%M:%S", localtime( $2 );
+            $sh{$auditid}{time}       .= '.' . $3;
+            $sh{$auditid}{timezone}   = strftime "%z", localtime( $2 );
             $sh{$auditid}{autime}     = time;
             $sh{$auditid}{addr}       = $1 if ( $event =~ m| addr=(\S+)| );
             $sh{$auditid}{exit}       = $1 if ( $event =~ m| exit=(-?\d+)| );
@@ -168,22 +172,23 @@ sub Main {
             # Some keys are unpredictable.
             # Some have values wrapped in quotes, some don't, and some are encoded
             #
-            if ( ( $event =~ m| name="([^"]+)" .* mode=(\d+) ouid=(\d+) | )
+            if ( ( $event =~ m| name=\S+ | )
             and ( $event !~ m| obj=system_u:object_r:ld_so_t:s0| ) ) {
-                $sh{$auditid}{names} = defined $sh{$auditid}{names} ? "$sh{$auditid}{names},$1" : $1;
-                $sh{$auditid}{mode}{$1} = $2;
-                $sh{$auditid}{ouid}{$1} = $3;
-            } elsif ( ( $event =~ m| name=([A-F0-9]+) .* mode=(\d+) ouid=(\d+) | )
-            and ( $event !~ m| obj=system_u:object_r:ld_so_t:s0| ) ) {
-                $name = pack( "H*", "$1" );
+                if ( $event =~ m| name="([^"]+)" | ) {
+                    $name = $1;
+                } elsif ( $event =~ m| name=([A-F0-9]+) | ) {
+                    $name = pack( "H*", "$1" );
+                } elsif ( $event =~ m| name=(\S+) | ) {
+                    $name = $1;
+                }
+
                 $sh{$auditid}{names} = defined $sh{$auditid}{names} ? "$sh{$auditid}{names},$name" : $name;
-                $sh{$auditid}{mode}{$name} = $2;
-                $sh{$auditid}{ouid}{$name} = $3;
-            } elsif ( ( $event =~ m| name=(\S+) .* mode=(\d+) ouid=(\d+) | ) 
-            and ( $event !~ m| obj=system_u:object_r:ld_so_t:s0| ) ) {
-                $sh{$auditid}{names} = defined $sh{$auditid}{names} ? "$sh{$auditid}{names},$1" : $1;
-                $sh{$auditid}{mode}{$1} = $2;
-                $sh{$auditid}{ouid}{$1} = $3;
+                if ( $event =~ m|mode=(\d+)| ) {
+                    $sh{$auditid}{mode}{$name} = $1;
+                }
+                if ( $event =~ m|ouid=(\d+)| ) {
+                    $sh{$auditid}{ouid}{$name} = $1;
+                }
             }
 
             if ( ( $event =~ m| nametype=(\S+)| ) 
