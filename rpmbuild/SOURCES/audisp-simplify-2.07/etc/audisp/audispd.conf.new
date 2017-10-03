@@ -1,0 +1,5 @@
+q_depth = 65536
+overflow_action = ignore
+priority_boost = 4
+max_restarts = 10
+name_format = HOSTNAME

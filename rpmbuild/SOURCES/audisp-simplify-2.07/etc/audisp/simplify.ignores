@@ -1,0 +1,16 @@
+exe="/opt/splunk/bin/splunkd"
+saddr=netlink.*
+saddr=public
+saddr=private
+saddr=/dev/log
+saddr=.*port 53
+saddr=.*:53
+saddr=::::::: port
+name=.*swx"$
+name=.*swp"$
+name=.*swpx"$
+exe=/var/ossec/bin/ossec-syscheckd
+exe=/opt/splunk/bin/splunkd
+exe=/opt/splunkforwarder/bin/splunkd
+proctitle=.*splunk-optimize.*
+command=.*splunk-optimize.*

@@ -581,8 +581,6 @@ INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
         exe=/var/ossec/bin/ossec-syscheckd
         exe=/opt/splunk/bin/splunkd
         exe=/opt/splunkforwarder/bin/splunkd
-        proctitle=.*splunk-optimize.*
-        command=.*splunk-optimize.*
         
 9) Restart the auditd service
 

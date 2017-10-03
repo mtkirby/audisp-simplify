@@ -1,0 +1,16 @@
+/var/log/audisp-simplify
+{
+rotate 30
+daily
+create
+compress
+dateext
+dateyesterday
+shred
+sharedscripts
+create 0600 root root
+postrotate
+    /sbin/service auditd restart >/dev/null 2>&1 || true
+    /bin/systemctl reload auditd.service >/dev/null 2>&1 || true
+endscript
+}
