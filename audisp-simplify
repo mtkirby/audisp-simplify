@@ -21,6 +21,7 @@
 # 20170216 Kirby  v2.0.5
 # 20170515 Kirby  v2.0.6
 # 20170522 Kirby  v2.0.7
+# 20201004 Kirby  v2.0.8
 ################################################################################
 
 # LICENSE
@@ -104,18 +105,23 @@ sub Main {
         close(IG);
     }
 
+    # type=PATH msg=audit(1542691793.976:3624): item=1 name="/lib64/ld-linux-x86-64.so.2" inode=67110215 dev=fd:00 mode=0100755 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:ld_so_t:s0 nametype=NORMAL cap_fp=0000000000000000 cap_fi=0000000000000000 cap_fe=0 cap_fver=0
+    #
+    # type=EXECVE msg=audit(1542691923.009:3917): argc=4 a0="grep" a1="--quiet" a2="-e" a3="/dev/ttyS"
+
+
+
   INPUT:
     while (<STDIN>) {
         chomp;
         $event = $_;
-        if ( $event =~ m|^node=(\S+) .* msg=audit\((\d+)\.(\d+):(\d+)\): | ) {
-            $auditid                  = $4;
-            $sh{$auditid}{node}       = $1;
+        if ( $event =~ m| msg=audit\((\d+)\.(\d+):(\d+)\): | ) {
+            $auditid                  = $3;
             $sh{$auditid}{auditid}    = $auditid;
-            $sh{$auditid}{date}       = strftime "%Y-%m-%d", localtime( $2 );
-            $sh{$auditid}{time}       = strftime "%H:%M:%S", localtime( $2 );
-            $sh{$auditid}{time}       .= '.' . $3;
-            $sh{$auditid}{timezone}   = strftime "%z", localtime( $2 );
+            $sh{$auditid}{date}       = strftime "%Y-%m-%d", localtime( $1 );
+            $sh{$auditid}{time}       = strftime "%H:%M:%S", localtime( $1 );
+            $sh{$auditid}{time}       .= '.' . $2;
+            $sh{$auditid}{timezone}   = strftime "%z", localtime( $1 );
             $sh{$auditid}{autime}     = time;
             $sh{$auditid}{addr}       = $1 if ( $event =~ m| addr=(\S+)| );
             $sh{$auditid}{exit}       = $1 if ( $event =~ m| exit=(-?\d+)| );
@@ -161,7 +167,8 @@ sub Main {
                 $sh{$auditid}{euid_user} = getpwuid($1) || 'unset';
             }
 
-            if ( $event =~ m| type=(\S+)| ) {
+            if ( ( $event =~ m|^type=(\S+)| ) 
+            or ( $event =~ m| type=(\S+)| ) ) {
                 unless ( $sh{$auditid}{types} =~ m|$1| ) {
                     $sh{$auditid}{types} = defined $sh{$auditid}{types} ? "$sh{$auditid}{types},$1" : $1;
                 }
@@ -436,17 +443,17 @@ Here is a Splunk query that I run: source="/var/log/audisp-simplify"  |table tim
 The logs include the auid_user, which is the original login id.  This is beneficial for seeing who made the syscalls after su'ing to another user such as root.
 
 Here is an execve syscall example of a shell command, ps -efww, executed as myself after su'ing to root:
-auditid="213706" auid="1000" auid_user="mkirby" command="ps -efww" cwd="/root" date="2017-02-02" euid="0" euid_user="root" exe="/usr/bin/ps" exit="0" key="EXECVE" node="goemon.mkirby.org" pid="4644" ppid="4572" proctitle="ps -efww" ses="814" subj="unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023" time="01:28:19+0000" tty="pts3" types="SYSCALL,EXECVE,CWD,PATH,PROCTITLE,EOE" uid="0" uid_user="root" 
+auditid="213706" auid="1000" auid_user="mkirby" command="ps -efww" cwd="/root" date="2017-02-02" euid="0" euid_user="root" exe="/usr/bin/ps" exit="0" key="EXECVE" pid="4644" ppid="4572" proctitle="ps -efww" ses="814" subj="unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023" time="01:28:19+0000" tty="pts3" types="SYSCALL,EXECVE,CWD,PATH,PROCTITLE,EOE" uid="0" uid_user="root" 
 
 
 Here is an example of /etc/hosts being modified.  Error code ESRCH means someone echo'd into the file.
-auditid="8688" auid="1000" auid_user="mkirby" cwd="/root" date="2017-02-02" errcode="ESRCH" errdesc="No such process" euid="0" euid_user="root" exe="/usr/bin/bash" exit="3" key="FILE" name="/etc/hosts" node="goemon.mkirby.org" pid="5884" ppid="5883" proctitle="-bash" ses="4" subj="unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023" time="02:12:14+0000" tty="pts2" types="SYSCALL,CWD,PATH,PROCTITLE,EOE" uid="0" uid_user="root"
+auditid="8688" auid="1000" auid_user="mkirby" cwd="/root" date="2017-02-02" errcode="ESRCH" errdesc="No such process" euid="0" euid_user="root" exe="/usr/bin/bash" exit="3" key="FILE" name="/etc/hosts" pid="5884" ppid="5883" proctitle="-bash" ses="4" subj="unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023" time="02:12:14+0000" tty="pts2" types="SYSCALL,CWD,PATH,PROCTITLE,EOE" uid="0" uid_user="root"
 
 Here is a connect syscall example of an egress connection to mkirby.org:
-auditid="9845" auid="1000" auid_user="mkirby" date="2017-02-02" euid="0" euid_user="root" exe="/usr/bin/telnet" exit="0" key="CONNECT" node="goemon.mkirby.org" pid="14649" port="80" ppid="5884" proctitle="telnet localhost 80" saddr="127.0.0.1" ses="4" subj="unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023" time="02:14:29+0000" tty="pts2" types="SYSCALL,SOCKADDR,PROCTITLE,EOE" uid="0" uid_user="root"
+auditid="9845" auid="1000" auid_user="mkirby" date="2017-02-02" euid="0" euid_user="root" exe="/usr/bin/telnet" exit="0" key="CONNECT" pid="14649" port="80" ppid="5884" proctitle="telnet localhost 80" saddr="127.0.0.1" ses="4" subj="unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023" time="02:14:29+0000" tty="pts2" types="SYSCALL,SOCKADDR,PROCTITLE,EOE" uid="0" uid_user="root"
 
 Here is a bind syscall example of httpd binding to port 80.
-auditid="1165" auid="4294967295" date="2017-02-01" euid="0" euid_user="root" exe="/usr/sbin/httpd" exit="0" key="BIND" node="goemon.mkirby.org" pid="3037" port="80" ppid="1" proctitle="(httpd)" saddr=":::::::" ses="4294967295" time="16:47:49+0000" tty="(none)" type="EOE" uid="0" uid_user="root"
+auditid="1165" auid="4294967295" date="2017-02-01" euid="0" euid_user="root" exe="/usr/sbin/httpd" exit="0" key="BIND" pid="3037" port="80" ppid="1" proctitle="(httpd)" saddr=":::::::" ses="4294967295" time="16:47:49+0000" tty="(none)" type="EOE" uid="0" uid_user="root"
 
 
 
@@ -459,7 +466,7 @@ INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
 
 3) Enable auditd  on bootup and start the service
 
-4) Create a new file, /etc/audisp/plugins.d/simplify.conf and add the following:
+4) Create a new file, /etc/audit/plugins.d/simplify.conf (/etc/audisp/plugins.d if rhel7) and add the following:
     active = yes
     direction = out
     path = /bin/audisp-simplify
@@ -467,10 +474,16 @@ INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
     format = string
 
 5) Increase queue in /etc/audisp/audispd.conf and set overflow_action to ignore
-    q_depth = 65536
+    q_depth = 655360
     overflow_action = ignore
+    priority_boost = 4
+    max_restarts = 10
+    name_format = HOSTNAME
+    #
+    # use /etc/audisp/plugins.d if rhel7
+    plugin_dir = /etc/audit/plugins.d/
 
-6) Replace /etc/audit/audit.rules and/or /etc/audit/rules.d/audit.rules with the following: (you may want to add/del to dir monitoring).  YOU NEED A KEY DEFINED ( -k ) for audisp-simplify to log the event.
+6) Replace /etc/audit/rules.d/audit.rules with the following: (you may want to add/del to dir monitoring).  YOU NEED A KEY DEFINED ( -k ) for audisp-simplify to log the event.
     # delete all existing rules
     -D
     # disable auditing during load
@@ -581,8 +594,6 @@ INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
         exe=/var/ossec/bin/ossec-syscheckd
         exe=/opt/splunk/bin/splunkd
         exe=/opt/splunkforwarder/bin/splunkd
-        proctitle=.*splunk-optimize.*
-        command=.*splunk-optimize.*
         
 9) Restart the auditd service
 
