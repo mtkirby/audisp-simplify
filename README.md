@@ -8,17 +8,17 @@ Here is a Splunk query that I run: source="/var/log/audisp-simplify"  |table tim
 The logs include the auid_user, which is the original login id.  This is beneficial for seeing who made the syscalls after su'ing to another user such as root.
 
 Here is an execve syscall example of a shell command, ps -efww, executed as myself after su'ing to root:
-auditid="213706" auid="1000" auid_user="mkirby" command="ps -efww" cwd="/root" date="2017-02-02" euid="0" euid_user="root" exe="/usr/bin/ps" exit="0" key="EXECVE" node="goemon.mkirby.org" pid="4644" ppid="4572" proctitle="ps -efww" ses="814" subj="unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023" time="01:28:19+0000" tty="pts3" types="SYSCALL,EXECVE,CWD,PATH,PROCTITLE,EOE" uid="0" uid_user="root" 
+auditid="213706" auid="1000" auid_user="mkirby" command="ps -efww" cwd="/root" date="2017-02-02" euid="0" euid_user="root" exe="/usr/bin/ps" exit="0" key="EXECVE" pid="4644" ppid="4572" proctitle="ps -efww" ses="814" subj="unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023" time="01:28:19+0000" tty="pts3" types="SYSCALL,EXECVE,CWD,PATH,PROCTITLE,EOE" uid="0" uid_user="root" 
 
 
 Here is an example of /etc/hosts being modified.  Error code ESRCH means someone echo'd into the file.
-auditid="8688" auid="1000" auid_user="mkirby" cwd="/root" date="2017-02-02" errcode="ESRCH" errdesc="No such process" euid="0" euid_user="root" exe="/usr/bin/bash" exit="3" key="FILE" name="/etc/hosts" node="goemon.mkirby.org" pid="5884" ppid="5883" proctitle="-bash" ses="4" subj="unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023" time="02:12:14+0000" tty="pts2" types="SYSCALL,CWD,PATH,PROCTITLE,EOE" uid="0" uid_user="root"
+auditid="8688" auid="1000" auid_user="mkirby" cwd="/root" date="2017-02-02" errcode="ESRCH" errdesc="No such process" euid="0" euid_user="root" exe="/usr/bin/bash" exit="3" key="FILE" name="/etc/hosts" pid="5884" ppid="5883" proctitle="-bash" ses="4" subj="unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023" time="02:12:14+0000" tty="pts2" types="SYSCALL,CWD,PATH,PROCTITLE,EOE" uid="0" uid_user="root"
 
 Here is a connect syscall example of an egress connection to mkirby.org:
-auditid="9845" auid="1000" auid_user="mkirby" date="2017-02-02" euid="0" euid_user="root" exe="/usr/bin/telnet" exit="0" key="CONNECT" node="goemon.mkirby.org" pid="14649" port="80" ppid="5884" proctitle="telnet localhost 80" saddr="127.0.0.1" ses="4" subj="unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023" time="02:14:29+0000" tty="pts2" types="SYSCALL,SOCKADDR,PROCTITLE,EOE" uid="0" uid_user="root"
+auditid="9845" auid="1000" auid_user="mkirby" date="2017-02-02" euid="0" euid_user="root" exe="/usr/bin/telnet" exit="0" key="CONNECT" pid="14649" port="80" ppid="5884" proctitle="telnet localhost 80" saddr="127.0.0.1" ses="4" subj="unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023" time="02:14:29+0000" tty="pts2" types="SYSCALL,SOCKADDR,PROCTITLE,EOE" uid="0" uid_user="root"
 
 Here is a bind syscall example of httpd binding to port 80.
-auditid="1165" auid="4294967295" date="2017-02-01" euid="0" euid_user="root" exe="/usr/sbin/httpd" exit="0" key="BIND" node="goemon.mkirby.org" pid="3037" port="80" ppid="1" proctitle="(httpd)" saddr=":::::::" ses="4294967295" time="16:47:49+0000" tty="(none)" type="EOE" uid="0" uid_user="root"
+auditid="1165" auid="4294967295" date="2017-02-01" euid="0" euid_user="root" exe="/usr/sbin/httpd" exit="0" key="BIND" pid="3037" port="80" ppid="1" proctitle="(httpd)" saddr=":::::::" ses="4294967295" time="16:47:49+0000" tty="(none)" type="EOE" uid="0" uid_user="root"
 
 
 
@@ -39,6 +39,7 @@ INSTALLATION for RedHat, Centos, Scientific Linux, and Fedora
     format = string
 
 5) Increase queue in /etc/audisp/audispd.conf and set overflow_action to ignore
+    # set to 9999 if rhel7
     q_depth = 65536
     overflow_action = ignore
 
