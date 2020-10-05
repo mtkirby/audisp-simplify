@@ -1,6 +1,7 @@
 #!/bin/bash
 ################################################################################
 # 20161007 Kirby
+# 20201005 Kirby
 ################################################################################
 
 
@@ -207,13 +208,14 @@ WARNING WARNING WARNING WARNING WARNING WARNING
 WARNING: You have SELinux enabled. Either turn it off or create a local policy.
 If you do not have a local policy, you will need to create one.
 
-1) First create the directory /etc/selinux/targeted/modules/active/src/.
+1) First make sure this directory exists: /etc/selinux/targeted/policy/.
 
-2) Add these lines to /etc/selinux/targeted/modules/active/src/local.te
+2) Add these lines to /etc/selinux/targeted/policy/local.te
 module local 1.0;
 require {
 	class dir { open getattr search write read remove_name add_name };
 	class file { create open read write execute execute_no_trans getattr };
+	class chr_file { open read getattr };
 	type audisp_t;
 	type auditd_t;
 	type auditd_etc_t;
@@ -221,6 +223,7 @@ require {
 	type urandom_device_t;
 	type var_log_t;
 }  
+allow auditd_t var_log_t:file { create open read write execute execute_no_trans getattr };
 allow audisp_t var_log_t:file { create open read write execute execute_no_trans getattr };
 allow audisp_t var_log_t:dir { write add_name };
 allow audisp_t auditd_etc_t:dir { read search open };
@@ -230,7 +233,7 @@ allow audisp_t auditd_log_t:file { read open getattr };
 allow audisp_t urandom_device_t:chr_file { read open getattr };
 
 3) Then run
-    cd /etc/selinux/targeted/modules/active/src/
+    cd /etc/selinux/targeted/policy/
     checkmodule -M -m -o local.mod local.te
     semodule_package -o local.pp -m local.mod
     semodule -i local.pp
