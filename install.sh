@@ -50,6 +50,19 @@ if [ ! -d "/etc/audisp/plugins.d" ]; then
     exit 1
 fi
 
+if [[ -d /etc/audit/plugins.d ]]
+then
+# rhel 8 moved this
+cat >/etc/audit/plugins.d/simplify.conf <<EOF
+active = yes
+direction = out
+path = /bin/audisp-simplify
+type = always
+format = string
+EOF
+chmod 640 /etc/audit/plugins.d/simplify.conf
+ln -s /etc/audit/plugins.d/simplify.conf /etc/audisp/plugins.d/simplify.conf >/dev/null 2>&1
+else
 cat >/etc/audisp/plugins.d/simplify.conf <<EOF
 active = yes
 direction = out
@@ -58,6 +71,7 @@ type = always
 format = string
 EOF
 chmod 640 /etc/audisp/plugins.d/simplify.conf
+fi
 
 
 cat /etc/audisp/audispd.conf |egrep -v "^q_depth |^overflow_action " >/tmp/audispd.conf
@@ -173,8 +187,8 @@ if [ -d "/etc/logrotate.d" ]; then
 EOF
 fi
 
-service auditd restart >/dev/null 2>&1
-systemctl reload auditd >/dev/null 2>&1
+service auditd stop >/dev/null 2>&1
+systemctl start auditd >/dev/null 2>&1 || service auditd start >/dev/null 2>&1
 
 
 cat >/etc/audisp/simplify.ignores <<EOF
@@ -192,7 +206,7 @@ exe=/opt/splunkforwarder/bin/splunkd
 EOF
 echo ""
 echo "##################################################"
-echo "I have setup the /etc/audisp/simplify.ingnores file with my settings."
+echo "I have setup the /etc/audisp/simplify.ignores file with my settings."
 echo "You may want to modify the file."
 echo "##################################################"
 echo ""

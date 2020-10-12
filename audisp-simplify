@@ -618,31 +618,34 @@ AFTER INSTALL
 
 INSTALLATION ADDENDUM FOR SELINUX
 If you are running SELinux, you may want to add the following to your local policy.
-1) Add these lines to /etc/selinux/targeted/modules/active/src/local.te
-    
-    module local 1.0;
-    require {
-        class dir { open getattr search write read remove_name add_name };
-        class file { create open read write execute execute_no_trans getattr };
-        type audisp_t;
-        type auditd_t;
-        type auditd_etc_t;
-        type auditd_log_t;
-        type urandom_device_t;
-        type var_log_t;
-    }  
-    allow audisp_t var_log_t:file { create open read write execute execute_no_trans getattr };
-    allow audisp_t var_log_t:dir { write add_name };
-    allow audisp_t auditd_etc_t:dir { read search open };
-    allow audisp_t auditd_etc_t:file { read open getattr };
-    allow audisp_t auditd_log_t:dir { read search open };
-    allow audisp_t auditd_log_t:file { read open getattr };
-    allow audisp_t urandom_device_t:chr_file { read open getattr };
+1) First make sure this directory exists: /etc/selinux/targeted/policy/.
 
+2) Add these lines to /etc/selinux/targeted/policy/local.te
+module local 1.0;
+require {
+	class dir { open getattr search write read remove_name add_name };
+	class file { create open read write execute execute_no_trans getattr };
+	class chr_file { open read getattr };
+	type audisp_t;
+	type auditd_t;
+	type auditd_etc_t;
+	type auditd_log_t;
+	type urandom_device_t;
+	type var_log_t;
+}  
+allow auditd_t var_log_t:file { create open read write execute execute_no_trans getattr };
+allow audisp_t var_log_t:file { create open read write execute execute_no_trans getattr };
+allow audisp_t var_log_t:dir { write add_name };
+allow audisp_t auditd_etc_t:dir { read search open };
+allow audisp_t auditd_etc_t:file { read open getattr };
+allow audisp_t auditd_log_t:dir { read search open };
+allow audisp_t auditd_log_t:file { read open getattr };
+allow audisp_t urandom_device_t:chr_file { read open getattr };
 
-2) and then run
-    cd /etc/selinux/targeted/modules/active/src/
+3) Then run
+    cd /etc/selinux/targeted/policy/
     checkmodule -M -m -o local.mod local.te
     semodule_package -o local.pp -m local.mod
     semodule -i local.pp
+
 
