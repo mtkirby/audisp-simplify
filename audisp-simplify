@@ -22,6 +22,7 @@
 # 20170515 Kirby  v2.0.6
 # 20170522 Kirby  v2.0.7
 # 20201004 Kirby  v2.0.8
+# 20201028 Kirby  v2.0.9
 ################################################################################
 
 # LICENSE
@@ -348,6 +349,7 @@ sub Main {
                     $sh{$auditid}{ALARMS} = join(', ', @alarms);
                 }
             }
+            $log = qq($sh{$auditid}{date} $sh{$auditid}{time} );
             foreach $subkey ( sort ( keys %{ $sh{$auditid} } ) ) {
                 next if ( $subkey eq "argc" );
                 next if ( $subkey eq "autime" );
@@ -455,6 +457,12 @@ auditid="9845" auid="1000" auid_user="mkirby" date="2017-02-02" euid="0" euid_us
 Here is a bind syscall example of httpd binding to port 80.
 auditid="1165" auid="4294967295" date="2017-02-01" euid="0" euid_user="root" exe="/usr/sbin/httpd" exit="0" key="BIND" pid="3037" port="80" ppid="1" proctitle="(httpd)" saddr=":::::::" ses="4294967295" time="16:47:49+0000" tty="(none)" type="EOE" uid="0" uid_user="root"
 
+If you are consuming the logs in Splunk, add this to your props.conf for the sourcetype you assigned, e.g. audisp-simplify:
+[audisp-simplify]
+SHOULD_LINEMERGE = False
+TRUNCATE = 0
+TIME_FORMAT = %Y-%m-%d %H:%M:%S.%f
+TZ = America/Chicago
 
 
 
@@ -623,15 +631,15 @@ If you are running SELinux, you may want to add the following to your local poli
 2) Add these lines to /etc/selinux/targeted/policy/local.te
 module local 1.0;
 require {
-	class dir { open getattr search write read remove_name add_name };
-	class file { create open read write execute execute_no_trans getattr };
-	class chr_file { open read getattr };
-	type audisp_t;
-	type auditd_t;
-	type auditd_etc_t;
-	type auditd_log_t;
-	type urandom_device_t;
-	type var_log_t;
+    class dir { open getattr search write read remove_name add_name };
+    class file { create open read write execute execute_no_trans getattr };
+    class chr_file { open read getattr };
+    type audisp_t;
+    type auditd_t;
+    type auditd_etc_t;
+    type auditd_log_t;
+    type urandom_device_t;
+    type var_log_t;
 }  
 allow auditd_t var_log_t:file { create open read write execute execute_no_trans getattr };
 allow audisp_t var_log_t:file { create open read write execute execute_no_trans getattr };
